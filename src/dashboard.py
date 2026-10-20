@@ -403,7 +403,15 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
         )
 
         if search_query and len(search_query.strip()) >= 2:
-            results = client.search_cities(search_query)
+            if search_query.strip().casefold() == "mordor":
+                results = [{
+                    "name": "Mordor",
+                    "label": "Mordor — ville fictive",
+                    "lat": 0.0,
+                    "lon": 0.0,
+                }]
+            else:
+                results = client.search_cities(search_query)
             st.session_state.city_search_results = results
         elif not search_query:
             # When the field is empty, show default cities
@@ -445,11 +453,15 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
 
         st.divider()
         st.subheader(":material/database: Données")
-        mock_mode = st.toggle(
-            "Mode déconnecté",
-            value=False,
-            help="Utilise des données simulées au lieu des API Open-Meteo.",
-        )
+        if city_info["name"] == "Mordor":
+            st.info("Mode démo activé : les données de Mordor sont simulées.")
+            mock_mode = True
+        else:
+            mock_mode = st.toggle(
+                "Mode déconnecté",
+                value=False,
+                help="Utilise des données simulées au lieu des API Open-Meteo.",
+            )
         st.caption(f"Cache local des réponses API : {CACHE_TTL_MINUTES} min")
 
         st.divider()
@@ -513,6 +525,7 @@ def render_dashboard():
 
     city_info, mock_mode, retro_mode = _render_sidebar()
     city_name = city_info["name"]
+    mordor_mode = city_name == "Mordor"
     theme_name = _get_theme_name(retro_mode)
     palette = THEMES[theme_name]
     _inject_styles(theme_name)
@@ -528,7 +541,13 @@ def render_dashboard():
 
     # Fetch Data
     with st.spinner(f"Chargement des données pour {city_name}…"):
-        raw_data = client.fetch_weather_and_air_quality(city_info["lat"], city_info["lon"], mock_mode=mock_mode)
+        raw_data = (
+            client.generate_mordor_data()
+            if mordor_mode
+            else client.fetch_weather_and_air_quality(
+                city_info["lat"], city_info["lon"], mock_mode=mock_mode
+            )
+        )
         df = DataProcessor.process_raw_api_data(raw_data)
 
     if df.empty:
@@ -541,7 +560,7 @@ def render_dashboard():
     latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
     _render_hero(city_name, latest, mock_mode, palette)
-    _render_alerts(detect_alerts(df, reference_time))
+    _render_alerts(detect_alerts(df, reference_time, mordor_mode=mordor_mode))
 
     # Visualizations
     tab1, tab2, tab3 = st.tabs([
@@ -562,20 +581,23 @@ def render_dashboard():
 
     with tab3:
         st.subheader("Localisation de la station de suivi")
-        map_df = pd.DataFrame([{
-            "lat": city_info["lat"],
-            "lon": city_info["lon"],
-            "city": city_name,
-            "aqi": latest["us_aqi"]
-        }])
-        fig_map = px.scatter_map(
-            map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
-            color_discrete_sequence=[palette["accent"]], zoom=12, height=600,
-            center={"lat": city_info["lat"], "lon": city_info["lon"]},
-            map_style=palette["map_style"]
-        )
-        fig_map.update_traces(marker=dict(size=18))
-        st.plotly_chart(fig_map, width="stretch")
+        if mordor_mode:
+            st.info("Mordor étant une ville fictive, aucune position géographique n'est affichée.")
+        else:
+            map_df = pd.DataFrame([{
+                "lat": city_info["lat"],
+                "lon": city_info["lon"],
+                "city": city_name,
+                "aqi": latest["us_aqi"]
+            }])
+            fig_map = px.scatter_map(
+                map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
+                color_discrete_sequence=[palette["accent"]], zoom=12, height=600,
+                center={"lat": city_info["lat"], "lon": city_info["lon"]},
+                map_style=palette["map_style"]
+            )
+            fig_map.update_traces(marker=dict(size=18))
+            st.plotly_chart(fig_map, width="stretch")
 
     st.divider()
     st.download_button(
@@ -585,3 +607,4 @@ def render_dashboard():
         mime="text/csv",
         on_click="ignore",
         width="stretch",
+    )

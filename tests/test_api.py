@@ -21,6 +21,12 @@ class TestWeatherAPIClient(unittest.TestCase):
         self.assertEqual(len(data["weather"]["hourly"]["time"]), 24 * 7)
         self.assertIn("pm2_5", data["air_quality"]["hourly"])
 
+    def test_mordor_mock_data_values(self):
+        data = self.client.generate_mordor_data()
+        self.assertEqual(data["weather"]["current_weather"]["temperature"], 60.0)
+        self.assertEqual(set(data["weather"]["hourly"]["temperature_2m"]), {60.0})
+        self.assertEqual(set(data["air_quality"]["hourly"]["pm2_5"]), {900.0})
+
     def test_cache_roundtrip(self):
         payload = {"hello": "world"}
         self.client._set_cached_data("test_key", payload)

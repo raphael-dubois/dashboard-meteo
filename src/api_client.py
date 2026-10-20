@@ -3,6 +3,7 @@ import sqlite3
 import datetime
 import json
 import logging
+from contextlib import closing
 from typing import Dict, Any, Optional
 
 import requests
@@ -94,7 +95,7 @@ class WeatherAPIClient:
     def _init_db(self) -> None:
         """Initializes SQLite cache database table."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS api_cache (
@@ -110,7 +111,7 @@ class WeatherAPIClient:
     def _get_cached_data(self, key: str) -> Optional[Dict[str, Any]]:
         """Retrieves cached json response if within TTL limit."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT response, timestamp FROM api_cache WHERE key = ?", (key,))
                 row = cursor.fetchone()
@@ -128,7 +129,7 @@ class WeatherAPIClient:
     def _set_cached_data(self, key: str, data: Dict[str, Any]) -> None:
         """Saves API response to local SQLite cache."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 now_str = datetime.datetime.now().isoformat()
                 cursor.execute("""
@@ -216,3 +217,17 @@ class WeatherAPIClient:
                 }
             }
         }
+
+    def generate_mordor_data(self) -> Dict[str, Any]:
+        """Returns simulated weather and air-quality data for the Mordor demo."""
+        data = self._generate_mock_data(0, 0)
+        hours = len(data["weather"]["hourly"]["time"])
+
+        data["weather"]["current_weather"]["temperature"] = 60.0
+        data["weather"]["hourly"]["temperature_2m"] = [60.0] * hours
+        data["weather"]["hourly"]["relativehumidity_2m"] = [5.0] * hours
+        data["air_quality"]["hourly"]["pm2_5"] = [900.0] * hours
+        data["air_quality"]["hourly"]["pm10"] = [1200.0] * hours
+        data["air_quality"]["hourly"]["nitrogen_dioxide"] = [600.0] * hours
+        data["air_quality"]["hourly"]["us_aqi"] = [500] * hours
+        return data
