@@ -23,8 +23,6 @@ DEFAULT_CITIES = {
     "Marseille": {"lat": 43.2965, "lon": 5.3698},
     "London": {"lat": 51.5074, "lon": -0.1278},
     "Madrid": {"lat": 40.4168, "lon": -3.7038},
-<<<<<<< HEAD
-=======
     "Tokyo": {"lat": 35.6895, "lon": 139.6917},
     "Sydney": {"lat": -33.8688, "lon": 151.2093},
     "New York": {"lat": 40.7128, "lon": -74.0060},
@@ -32,8 +30,7 @@ DEFAULT_CITIES = {
     "Abu Dhabi": {"lat": 24.4539, "lon": 54.3773},
     "Berlin": {"lat": 52.5200, "lon": 13.4050},
     "Moscow": {"lat": 55.7558, "lon": 37.6173},
-    "Rome": {"lat": 41.9028, "lon": 12.4964},
->>>>>>> d20917f1de06390e93e209732d0ed945eaf368cc
+    "Rome": {"lat": 41.9028, "lon": 12.4964}
 }
 
 # Thresholds for alerts (WHO Guidelines)
