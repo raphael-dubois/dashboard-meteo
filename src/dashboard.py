@@ -379,37 +379,17 @@ def _render_sidebar() -> Tuple[str, bool, bool]:
     """Sidebar: location, data source and appearance. Returns (city, mock_mode, retro_mode)."""
     with st.sidebar:
         st.subheader(":material/location_on: Lieu")
-        selected_city = st.selectbox(
-            "Ville",
-            list(DEFAULT_CITIES.keys()),
-            index=0,
-            accept_new_options=True,
-            help="Saisissez Mordor pour activer le mode de démonstration.",
-        )
-        mordor_mode = selected_city.strip().casefold() == "mordor"
-        matching_city = next(
-            (city for city in DEFAULT_CITIES if city.casefold() == selected_city.strip().casefold()),
-            None,
-        )
-        if mordor_mode:
-            selected_city = "Mordor"
-            st.caption("Ville fictive — mode de démonstration simulé.")
-        elif matching_city:
-            selected_city = matching_city
-            city_info = DEFAULT_CITIES[matching_city]
-            st.caption(_format_coordinates(city_info["lat"], city_info["lon"]))
+        selected_city = st.selectbox("Ville", list(DEFAULT_CITIES.keys()))
+        city_info = DEFAULT_CITIES[selected_city]
+        st.caption(_format_coordinates(city_info["lat"], city_info["lon"]))
 
         st.divider()
         st.subheader(":material/database: Données")
-        if mordor_mode:
-            st.info("Mode mock activé pour la démonstration Mordor.")
-            mock_mode = True
-        else:
-            mock_mode = st.toggle(
-                "Mode déconnecté",
-                value=False,
-                help="Utilise des données simulées au lieu des API Open-Meteo.",
-            )
+        mock_mode = st.toggle(
+            "Mode déconnecté",
+            value=False,
+            help="Utilise des données simulées au lieu des API Open-Meteo.",
+        )
         st.caption(f"Cache local des réponses API : {CACHE_TTL_MINUTES} min")
 
         st.divider()
@@ -467,23 +447,6 @@ def render_dashboard():
     st.set_page_config(page_title="Dashboard Météo & AQI", page_icon=":material/partly_cloudy_day:", layout="wide")
 
     selected_city, mock_mode, retro_mode = _render_sidebar()
-    mordor_mode = selected_city == "Mordor"
-    if mordor_mode:
-        city_info = {"lat": 0.0, "lon": 0.0}
-    else:
-        city_key = next(
-            (city for city in DEFAULT_CITIES if city.casefold() == selected_city.casefold()),
-            None,
-        )
-        if city_key is None:
-            st.error(
-                f"Ville inconnue : {selected_city}. Choisissez une ville proposée ou saisissez « Mordor ».",
-                icon=":material/error:",
-            )
-            return
-        city_info = DEFAULT_CITIES[city_key]
-        selected_city = city_key
-    mock_mode = mock_mode or mordor_mode
     theme_name = _get_theme_name(retro_mode)
     palette = THEMES[theme_name]
     _inject_styles(theme_name)
@@ -496,16 +459,11 @@ def render_dashboard():
     """)
 
     client = WeatherAPIClient()
+    city_info = DEFAULT_CITIES[selected_city]
 
     # Fetch Data
     with st.spinner(f"Chargement des données pour {selected_city}…"):
-        raw_data = (
-            client.generate_mordor_data()
-            if mordor_mode
-            else client.fetch_weather_and_air_quality(
-                city_info["lat"], city_info["lon"], mock_mode=mock_mode
-            )
-        )
+        raw_data = client.fetch_weather_and_air_quality(city_info["lat"], city_info["lon"], mock_mode=mock_mode)
         df = DataProcessor.process_raw_api_data(raw_data)
 
     if df.empty:
@@ -518,7 +476,7 @@ def render_dashboard():
     latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
     _render_hero(selected_city, latest, mock_mode, palette)
-    _render_alerts(detect_alerts(df, reference_time, mordor_mode=mordor_mode))
+    _render_alerts(detect_alerts(df, reference_time))
 
     # Visualizations
     tab1, tab2, tab3 = st.tabs([
@@ -539,23 +497,20 @@ def render_dashboard():
 
     with tab3:
         st.subheader("Localisation de la station de suivi")
-        if mordor_mode:
-            st.info("Mordor étant une ville fictive, aucune position géographique n'est affichée.")
-        else:
-            map_df = pd.DataFrame([{
-                "lat": city_info["lat"],
-                "lon": city_info["lon"],
-                "city": selected_city,
-                "aqi": latest["us_aqi"]
-            }])
-            fig_map = px.scatter_map(
-                map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
-                color_discrete_sequence=[palette["accent"]], zoom=12, height=600,
-                center={"lat": city_info["lat"], "lon": city_info["lon"]},
-                map_style=palette["map_style"]
-            )
-            fig_map.update_traces(marker=dict(size=18))
-            st.plotly_chart(fig_map, width="stretch")
+        map_df = pd.DataFrame([{
+            "lat": city_info["lat"],
+            "lon": city_info["lon"],
+            "city": selected_city,
+            "aqi": latest["us_aqi"]
+        }])
+        fig_map = px.scatter_map(
+            map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
+            color_discrete_sequence=[palette["accent"]], zoom=12, height=600,
+            center={"lat": city_info["lat"], "lon": city_info["lon"]},
+            map_style=palette["map_style"]
+        )
+        fig_map.update_traces(marker=dict(size=18))
+        st.plotly_chart(fig_map, width="stretch")
 
     st.divider()
     st.download_button(
@@ -565,4 +520,3 @@ def render_dashboard():
         mime="text/csv",
         on_click="ignore",
         width="stretch",
-    )

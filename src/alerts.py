@@ -14,11 +14,7 @@ THRESHOLDS = {
 }
 
 
-def detect_alerts(
-    df: pd.DataFrame,
-    reference_time: Optional[datetime.datetime] = None,
-    mordor_mode: bool = False,
-) -> List[Dict[str, str]]:
+def detect_alerts(df: pd.DataFrame, reference_time: Optional[datetime.datetime] = None) -> List[Dict[str, str]]:
     """Scans the current data point for threshold violations."""
     alerts = []
     if df.empty:
@@ -30,12 +26,7 @@ def detect_alerts(
     if latest["pm2_5"] >= THRESHOLDS["pm2_5"]["danger"]:
         alerts.append({
             "level": "danger",
-            "message": (
-                "Alerte Rouge Pollution : Sauron a rallumé les hauts fourneaux"
-                if mordor_mode
-                else f"Alerte Rouge Pollution (PM2.5) : {latest['pm2_5']:.1f} "
-                f"{THRESHOLDS['pm2_5']['unit']} (Seuil: {THRESHOLDS['pm2_5']['danger']})"
-            )
+            "message": f"Alerte Rouge Pollution (PM2.5) : {latest['pm2_5']:.1f} {THRESHOLDS['pm2_5']['unit']} (Seuil: {THRESHOLDS['pm2_5']['danger']})"
         })
     elif latest["pm2_5"] >= THRESHOLDS["pm2_5"]["warning"]:
         alerts.append({
