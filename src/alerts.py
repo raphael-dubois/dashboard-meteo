@@ -20,6 +20,26 @@ THRESHOLDS = {
 
 POLLUTANT_KEYS = ["pm2_5", "pm10", "no2", "o3", "so2", "co"]
 
+# US AQI categories: (upper bound, label)
+AQI_CATEGORIES = [
+    (50, "Air de bonne qualité"),
+    (100, "Qualité de l'air modérée"),
+    (150, "Mauvais pour les personnes sensibles"),
+    (200, "Air de mauvaise qualité"),
+    (300, "Air de très mauvaise qualité"),
+    (float("inf"), "Air dangereux"),
+]
+# Short names (map legend, report), same order as AQI_CATEGORIES
+AQI_SHORT_LABELS = ["Bon", "Modéré", "Mauvais (sensibles)", "Mauvais", "Très mauvais", "Dangereux"]
+
+
+def aqi_index(aqi: float) -> int:
+    """Index of the US AQI category in AQI_CATEGORIES."""
+    for index, (upper_bound, _) in enumerate(AQI_CATEGORIES):
+        if aqi <= upper_bound:
+            return index
+    return len(AQI_CATEGORIES) - 1
+
 
 def current_means(df: pd.DataFrame, reference_time: Optional[datetime.datetime] = None) -> Dict[str, float]:
     """Current value of every monitored variable over its WHO averaging period."""

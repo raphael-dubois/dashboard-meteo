@@ -6,9 +6,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-from .alerts import POLLUTANT_KEYS, THRESHOLDS, current_means, detect_alerts
+from .alerts import (
+    AQI_CATEGORIES, AQI_SHORT_LABELS, POLLUTANT_KEYS, THRESHOLDS, aqi_index, current_means, detect_alerts,
+)
 from .api_client import WeatherAPIClient, DEFAULT_CITIES, CACHE_TTL_MINUTES
 from .data_processing import DataProcessor
+from .export import build_pdf_report, report_file_name
 
 # Palettes for the custom blocks and charts.
 # "editorial" adapts to Streamlit's light/dark mode on its own: neutral tones derive from the
@@ -49,19 +52,6 @@ THEMES: Dict[str, Dict[str, Any]] = {
         "map_style": "carto-darkmatter",
     },
 }
-
-# Short AQI category names for the map legend, same order as AQI_CATEGORIES
-AQI_SHORT_LABELS = ["Bon", "Modéré", "Mauvais (sensibles)", "Mauvais", "Très mauvais", "Dangereux"]
-
-# US AQI categories: (upper bound, label); colors come from the active palette
-AQI_CATEGORIES = [
-    (50, "Air de bonne qualité"),
-    (100, "Qualité de l'air modérée"),
-    (150, "Mauvais pour les personnes sensibles"),
-    (200, "Air de mauvaise qualité"),
-    (300, "Air de très mauvaise qualité"),
-    (float("inf"), "Air dangereux"),
-]
 
 # Metric catalog shared by the statistics and the charts: column -> (label, unit, decimals)
 METRICS = {
@@ -252,17 +242,9 @@ def _format_coordinates(lat: float, lon: float) -> str:
     return f"{abs(lat):.2f}° {lat_ref} · {abs(lon):.2f}° {lon_ref}"
 
 
-def _aqi_index(aqi: float) -> int:
-    """Index of the US AQI category in AQI_CATEGORIES."""
-    for index, (upper_bound, _) in enumerate(AQI_CATEGORIES):
-        if aqi <= upper_bound:
-            return index
-    return len(AQI_CATEGORIES) - 1
-
-
 def _aqi_category(aqi: float, p: Dict[str, Any]) -> Tuple[str, str]:
     """Returns the (label, color) pair of the US AQI category."""
-    index = _aqi_index(aqi)
+    index = aqi_index(aqi)
     return AQI_CATEGORIES[index][1], p["aqi"][index]
 
 
@@ -313,8 +295,8 @@ def _pollutants_html(means: Dict[str, float], p: Dict[str, Any]) -> str:
     return f'<div class="pollutants">{"".join(items)}<span class="pollutants-caption">{caption}</span></div>'
 
 
-def _data_source_badge(raw_data: Dict[str, Any], city_name: str, mock_mode: bool) -> str:
-    """Badge explaining offline data: why, which reference city, and the recording date."""
+def _data_source_note(raw_data: Dict[str, Any], city_name: str, mock_mode: bool) -> str:
+    """Explains offline data (why, which reference city, recording date); empty for live data."""
     if raw_data.get("source") != "mock":
         return ""
     details = ["Données simulées (mode déconnecté)" if mock_mode else "Données simulées : API indisponible"]
@@ -323,8 +305,15 @@ def _data_source_badge(raw_data: Dict[str, Any], city_name: str, mock_mode: bool
     if raw_data.get("mock_captured_at"):
         captured = datetime.datetime.fromisoformat(raw_data["mock_captured_at"])
         details.append(f"instantané du {captured:%d/%m/%Y}")
+    return " · ".join(details)
+
+
+def _data_source_badge(note: str, mock_mode: bool) -> str:
+    """Hero badge for the data source note (warning style when the API failed)."""
+    if not note:
+        return ""
     css_class = "hero-badge" if mock_mode else "hero-badge hero-badge--warning"
-    return f'<span class="{css_class}">{" · ".join(details)}</span>'
+    return f'<span class="{css_class}">{note}</span>'
 
 
 def _render_hero(
@@ -610,7 +599,7 @@ def _render_map(
     map_df = pd.DataFrame(rows)
     map_df["aqi"] = pd.to_numeric(map_df["aqi"], errors="coerce")
     map_df["category"] = map_df["aqi"].apply(
-        lambda aqi: "Indisponible" if pd.isna(aqi) else AQI_SHORT_LABELS[_aqi_index(aqi)]
+        lambda aqi: "Indisponible" if pd.isna(aqi) else AQI_SHORT_LABELS[aqi_index(aqi)]
     )
     map_df["aqi_text"] = map_df["aqi"].apply(lambda aqi: "indisponible" if pd.isna(aqi) else f"{aqi:.0f}")
 
@@ -884,7 +873,8 @@ def render_dashboard():
     daily = DataProcessor.process_daily_data(raw_data)
     today_date = latest["datetime"].date()
     today = daily.loc[today_date] if today_date in daily.index else None
-    badge = _data_source_badge(raw_data, city_name, mock_mode)
+    data_note = _data_source_note(raw_data, city_name, mock_mode)
+    badge = _data_source_badge(data_note, mock_mode)
     temp_change = DataProcessor.compute_statistics(df, ["temperature_2m"], 24, reference_time).loc[
         "temperature_2m", "change_24h"]
     _render_hero(city_name, latest, today, current_means(df, reference_time), temp_change, badge, palette)
@@ -925,11 +915,28 @@ def render_dashboard():
         _render_map(city_info, latest["us_aqi"], client, mock_mode, palette, retro_mode)
 
     st.divider()
-    st.download_button(
-        "Télécharger les données de toutes les villes (CSV)",
-        data=lambda: _all_cities_csv(client, mock_mode),
-        file_name="donnees_toutes_les_villes.csv",
-        mime="text/csv",
-        on_click="ignore",
-        width="stretch",
-    )
+    st.subheader(":material/download: Exports")
+    col_pdf, col_csv = st.columns(2)
+    with col_pdf:
+        # Built only when clicked: the report needs a few charts rendered with matplotlib
+        st.download_button(
+            f"Rapport PDF de {city_name}",
+            data=lambda: build_pdf_report(city_info, df, start_date, end_date, today, reference_time, data_note),
+            file_name=report_file_name(city_name, latest["datetime"]),
+            mime="application/pdf",
+            on_click="ignore",
+            icon=":material/picture_as_pdf:",
+            width="stretch",
+        )
+        st.caption("2 pages : conditions actuelles, polluants, alertes, graphiques de la période et statistiques.")
+    with col_csv:
+        st.download_button(
+            "Toutes les villes (CSV)",
+            data=lambda: _all_cities_csv(client, mock_mode),
+            file_name="donnees_toutes_les_villes.csv",
+            mime="text/csv",
+            on_click="ignore",
+            icon=":material/table_view:",
+            width="stretch",
+        )
+        st.caption("Les villes de référence sur 2 jours, une ligne toutes les 2 heures.")

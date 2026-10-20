@@ -1,6 +1,7 @@
 import datetime
 import io
 import os
+import re
 import tempfile
 import unittest
 
@@ -10,6 +11,7 @@ from src.alerts import current_means, detect_alerts
 from src.api_client import DEFAULT_CITIES, WeatherAPIClient
 from src.dashboard import _all_cities_csv
 from src.data_processing import DataProcessor
+from src.export import build_pdf_report, report_file_name
 
 
 class TestDashboardModules(unittest.TestCase):
@@ -119,6 +121,36 @@ class TestDashboardModules(unittest.TestCase):
             paris_times = pd.to_datetime(exported_df.loc[exported_df["ville"] == "Paris", "datetime"])
             diffs = paris_times.diff().dropna()
             self.assertTrue((diffs == pd.Timedelta(hours=2)).all())
+
+    def _offline_paris(self, tmp: str):
+        client = WeatherAPIClient(db_path=os.path.join(tmp, "test_cache.db"))
+        raw = client.fetch_weather_and_air_quality(48.8566, 2.3522, mock_mode=True)
+        return DataProcessor.process_raw_api_data(raw), DataProcessor.get_reference_time(raw)
+
+    @staticmethod
+    def _page_count(pdf: bytes) -> int:
+        return len(re.findall(rb"/Type /Page\b(?!s)", pdf))
+
+    def test_pdf_report_has_two_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            df, reference_time = self._offline_paris(tmp)
+            city = {"name": "Paris", "lat": 48.8566, "lon": 2.3522}
+            pdf = build_pdf_report(city, df, df["datetime"].min().date(), df["datetime"].max().date(),
+                                   None, reference_time, "Données simulées")
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertEqual(self._page_count(pdf), 2)
+
+    def test_pdf_report_handles_an_empty_period(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            df, reference_time = self._offline_paris(tmp)
+            pdf = build_pdf_report({"name": "Paris", "lat": 48.8566, "lon": 2.3522}, df,
+                                   datetime.date(2000, 1, 1), datetime.date(2000, 1, 2), None, reference_time)
+        self.assertEqual(self._page_count(pdf), 2)
+
+    def test_report_file_name_is_ascii(self):
+        when = datetime.datetime(2026, 10, 20, 17, 0)
+        self.assertEqual(report_file_name("Zürich", when), "rapport_meteo_zurich_2026-10-20.pdf")
+        self.assertEqual(report_file_name("New York", when), "rapport_meteo_new_york_2026-10-20.pdf")
 
 
 if __name__ == "__main__":
