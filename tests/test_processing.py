@@ -29,6 +29,23 @@ class TestDashboardModules(unittest.TestCase):
         alerts = detect_alerts(self.mock_df)
         self.assertTrue(len(alerts) > 0)
 
+    def test_mordor_alert_and_zero_health_score(self):
+        mordor_df = pd.DataFrame({
+            "temperature_2m": [60.0],
+            "relativehumidity_2m": [5.0],
+            "pm2_5": [900.0],
+            "nitrogen_dioxide": [600.0],
+        })
+        self.assertEqual(
+            DataProcessor.calculate_custom_health_index(mordor_df).iloc[0],
+            0.0,
+        )
+        alerts = detect_alerts(mordor_df, mordor_mode=True)
+        self.assertEqual(
+            alerts[0]["message"],
+            "Alerte Rouge Pollution : Sauron a rallumé les hauts fourneaux",
+        )
+
     def test_no_alerts_on_empty_df(self):
         self.assertEqual(detect_alerts(pd.DataFrame()), [])
 

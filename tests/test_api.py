@@ -3,6 +3,8 @@ import tempfile
 import unittest
 
 from src.api_client import WeatherAPIClient
+from src.alerts import detect_alerts
+from src.data_processing import DataProcessor
 
 
 class TestWeatherAPIClient(unittest.TestCase):
@@ -20,6 +22,20 @@ class TestWeatherAPIClient(unittest.TestCase):
         self.assertIn("air_quality", data)
         self.assertEqual(len(data["weather"]["hourly"]["time"]), 24 * 7)
         self.assertIn("pm2_5", data["air_quality"]["hourly"])
+
+    def test_mordor_mock_data_values(self):
+        data = self.client.generate_mordor_data()
+        self.assertEqual(set(data["weather"]["hourly"]["temperature_2m"]), {60.0})
+        self.assertEqual(set(data["air_quality"]["hourly"]["pm2_5"]), {900.0})
+        self.assertEqual(data["weather"]["current_weather"]["temperature"], 60.0)
+        df = DataProcessor.process_raw_api_data(data)
+        df["health_score"] = DataProcessor.calculate_custom_health_index(df)
+        self.assertEqual(set(df["health_score"]), {0.0})
+        alerts = detect_alerts(df, mordor_mode=True)
+        self.assertEqual(
+            alerts[0]["message"],
+            "Alerte Rouge Pollution : Sauron a rallumé les hauts fourneaux",
+        )
 
     def test_cache_roundtrip(self):
         payload = {"hello": "world"}
