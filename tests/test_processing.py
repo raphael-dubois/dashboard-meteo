@@ -30,6 +30,24 @@ class TestDashboardModules(unittest.TestCase):
         self.assertEqual(len(scores), 2)
         self.assertGreater(scores.iloc[0], scores.iloc[1])
 
+    def test_health_index_uses_apparent_temperature(self):
+        df = self.mock_df.assign(apparent_temperature=[21.0, 21.0], temperature_2m=[40.0, 21.0])
+        scores = DataProcessor.calculate_custom_health_index(df)
+        # Same feels-like temperature: only humidity and pollution differ, not the 40 °C reading
+        expected_gap = (abs(20.0 - 50.0) - abs(50.0 - 50.0)) * 0.3 + (30.0 - 10.0) * 1.2
+        self.assertAlmostEqual(scores.iloc[0] - scores.iloc[1], expected_gap, places=1)
+
+    def test_process_daily_data_indexes_by_date(self):
+        raw = {"weather": {"daily": {
+            "time": ["2026-01-01", "2026-01-02"],
+            "temperature_2m_max": [12.0, 14.0],
+            "temperature_2m_min": [3.0, 5.0],
+            "precipitation_sum": [0.0, 2.5],
+        }}}
+        daily = DataProcessor.process_daily_data(raw)
+        self.assertEqual(daily.loc[datetime.date(2026, 1, 2), "precipitation_sum"], 2.5)
+        self.assertTrue(DataProcessor.process_daily_data({}).empty)
+
     def test_alerts_detection(self):
         alerts = detect_alerts(self.mock_df)
         self.assertTrue(len(alerts) > 0)

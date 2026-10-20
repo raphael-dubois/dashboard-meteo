@@ -13,6 +13,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DB = os.path.join(BASE_DIR, "data", "data_cache.db")
 CACHE_TTL_MINUTES = 30
+# Days of history requested from the APIs (needed for 7-day trends)
+PAST_DAYS = 7
 DEFAULT_CITIES = {
     "Paris": {"lat": 48.8566, "lon": 2.3522},
     "Lyon": {"lat": 45.7640, "lon": 4.8357},
@@ -143,7 +145,8 @@ class WeatherAPIClient:
         """
         Fetches combined weather and air quality data from Open-Meteo or local mock generator.
         """
-        cache_key = f"data_{lat}_{lon}"
+        # "v2": responses now include 7 days of history and extra variables
+        cache_key = f"data_v2_{lat}_{lon}"
 
         if mock_mode:
             return self._generate_mock_data(lat, lon)
@@ -154,13 +157,16 @@ class WeatherAPIClient:
 
         weather_url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-            f"&current_weather=true&hourly=temperature_2m,relativehumidity_2m,surface_pressure,windspeed_10m"
-            f"&timezone=auto"
+            f"&current_weather=true"
+            f"&hourly=temperature_2m,relativehumidity_2m,apparent_temperature,precipitation,cloud_cover,"
+            f"surface_pressure,windspeed_10m,wind_direction_10m"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
+            f"&past_days={PAST_DAYS}&timezone=auto"
         )
         air_quality_url = (
             f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}"
             f"&hourly=pm10,pm2_5,nitrogen_dioxide,ozone,sulphur_dioxide,carbon_monoxide,us_aqi"
-            f"&timezone=auto"
+            f"&past_days={PAST_DAYS}&timezone=auto"
         )
 
         try:
@@ -172,6 +178,7 @@ class WeatherAPIClient:
             air_res.raise_for_status()
 
             combined = {
+                "source": "api",
                 "weather": weather_res.json(),
                 "air_quality": air_res.json()
             }
@@ -183,12 +190,22 @@ class WeatherAPIClient:
             return self._generate_mock_data(lat, lon)
 
     def _generate_mock_data(self, lat: float, lon: float) -> Dict[str, Any]:
-        """Fallback mock data generator for disconnected mode or testing."""
+        """
+        Fallback mock data generator for disconnected mode or testing.
+        The "source" key lets the UI warn that the data is simulated.
+        """
         hours = 24 * 7
         now = datetime.datetime.now()
         times = [(now - datetime.timedelta(hours=i)).isoformat() for i in range(hours)][::-1]
+        temperatures = np.random.normal(20, 5, hours)
+        precipitation = np.where(np.random.rand(hours) < 0.15, np.random.uniform(0.1, 3.0, hours), 0.0)
+
+        # Daily aggregates derived from the hourly series, like the API's "daily" block
+        days = sorted({t[:10] for t in times})
+        day_masks = [np.array([t.startswith(day) for t in times]) for day in days]
 
         return {
+            "source": "mock",
             "weather": {
                 "current_weather": {
                     "temperature": round(np.random.uniform(15, 30), 1),
@@ -197,10 +214,20 @@ class WeatherAPIClient:
                 },
                 "hourly": {
                     "time": times,
-                    "temperature_2m": np.random.normal(20, 5, hours).tolist(),
+                    "temperature_2m": temperatures.tolist(),
                     "relativehumidity_2m": np.random.uniform(40, 90, hours).tolist(),
+                    "apparent_temperature": (temperatures + np.random.uniform(-3, 2, hours)).tolist(),
+                    "precipitation": precipitation.tolist(),
+                    "cloud_cover": np.random.uniform(0, 100, hours).tolist(),
                     "surface_pressure": np.random.uniform(1000, 1025, hours).tolist(),
-                    "windspeed_10m": np.random.uniform(2, 30, hours).tolist()
+                    "windspeed_10m": np.random.uniform(2, 30, hours).tolist(),
+                    "wind_direction_10m": np.random.uniform(0, 360, hours).tolist()
+                },
+                "daily": {
+                    "time": days,
+                    "temperature_2m_max": [float(temperatures[mask].max()) for mask in day_masks],
+                    "temperature_2m_min": [float(temperatures[mask].min()) for mask in day_masks],
+                    "precipitation_sum": [float(precipitation[mask].sum()) for mask in day_masks]
                 }
             },
             "air_quality": {

@@ -58,6 +58,16 @@ AQI_CATEGORIES = [
     (float("inf"), "Air dangereux"),
 ]
 
+# Pollutants shown under the weather tiles: (DataFrame column, label, THRESHOLDS key)
+POLLUTANTS = [
+    ("pm2_5", "PM2.5", "pm2_5"),
+    ("pm10", "PM10", "pm10"),
+    ("nitrogen_dioxide", "NO₂", "no2"),
+    ("ozone", "O₃", "o3"),
+    ("sulphur_dioxide", "SO₂", "so2"),
+    ("carbon_monoxide", "CO", "co"),
+]
+
 FRENCH_DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 FRENCH_MONTHS = [
     "janvier", "février", "mars", "avril", "mai", "juin",
@@ -82,18 +92,26 @@ def _build_css(p: Dict[str, Any]) -> str:
 .hero-temp {{ font-size: 4.25rem; font-weight: 600; line-height: 1.05; color: {p["text"]}; }}
 .hero-sub {{ font-size: 0.95rem; color: {p["muted"]}; }}
 .hero-badge {{ display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.5rem; border: 1px solid {p["line"]}; border-radius: 4px; font-size: 0.75rem; color: {p["muted"]}; }}
+.hero-badge--warning {{ border-color: {p["warning"]}; color: {p["warning_fg"]}; background: {p["warning_bg"]}; }}
 .hero-aqi {{ display: flex; align-items: center; gap: 1rem; }}
 .aqi-ring {{ flex: none; position: relative; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; }}
 .aqi-ring::before {{ content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--aqi-fill); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 9px)); mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 9px)); }}
 .aqi-ring-inner {{ position: relative; font-size: 1.4rem; font-weight: 600; color: {p["text"]}; }}
 .hero-aqi-label {{ font-size: 1.05rem; font-weight: 600; color: {p["text"]}; }}
 .hero-aqi-caption {{ font-size: 0.85rem; color: {p["muted"]}; }}
-.stats {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid {p["line"]}; padding-top: 0.9rem; margin-bottom: 1.25rem; }}
+.stats {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 0.9rem; border-top: 1px solid {p["line"]}; padding-top: 0.9rem; margin-bottom: 0.9rem; }}
 .stat {{ padding: 0 1.25rem; border-left: 1px solid {p["line"]}; }}
-.stat:first-child {{ padding-left: 0; border-left: none; }}
+.stat:nth-child(3n+1) {{ padding-left: 0; border-left: none; }}
 .stat-label {{ font-size: 0.85rem; color: {p["muted"]}; }}
 .stat-value {{ font-size: 1.6rem; font-weight: 600; color: {p["text"]}; }}
 .stat-unit {{ font-size: 0.9rem; font-weight: 400; color: {p["muted"]}; margin-left: 0.25rem; }}
+.wind-dir {{ font-size: 0.9rem; font-weight: 400; color: {p["muted"]}; margin-left: 0.5rem; }}
+.wind-arrow {{ display: inline-block; }}
+.pollutants {{ display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; border-top: 1px solid {p["line"]}; padding: 0.75rem 0; margin-bottom: 1rem; }}
+.pollutant {{ display: flex; align-items: center; gap: 0.4rem; font-size: 0.95rem; color: {p["text"]}; }}
+.pollutant-dot {{ width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--dot); }}
+.pollutant-label {{ color: {p["muted"]}; }}
+.pollutants-caption {{ font-size: 0.8rem; color: {p["muted"]}; }}
 .meteo-alert {{ border-left: 3px solid; border-radius: 0; padding: 0.65rem 1rem; margin-bottom: 0.6rem; }}
 .meteo-alert p {{ margin: 0; }}
 .meteo-alert--danger {{ border-color: {p["danger"]}; background: {p["danger_bg"]}; color: {p["danger_fg"]}; }}
@@ -151,7 +169,7 @@ def _build_retro_css(p: Dict[str, Any]) -> str:
 .stApp [data-testid="stDownloadButton"] button:hover p, .stApp [data-testid="stButton"] button:hover p {{ color: {magenta}; }}
 .masthead {{ border-bottom: 2px solid {magenta}; box-shadow: 0 6px 12px -8px {magenta}; }}
 .masthead-title {{ font-family: {PIXEL}; font-size: 0.95rem; line-height: 1.8; color: {cyan}; text-shadow: 0 0 8px rgba(0, 240, 255, 0.7); }}
-.masthead-sub, .hero-date, .hero-sub, .hero-aqi-caption, .stat-label, .stat-unit {{ font-family: {TERMINAL}; font-size: 1.15rem; }}
+.masthead-sub, .hero-date, .hero-sub, .hero-aqi-caption, .stat-label, .stat-unit, .wind-dir, .pollutant, .pollutants-caption {{ font-family: {TERMINAL}; font-size: 1.15rem; }}
 .hero-city {{ font-family: {PIXEL}; font-size: 2rem; line-height: 1.5; color: {magenta}; text-shadow: 0 0 10px {magenta}, 0 0 24px rgba(255, 43, 214, 0.5); }}
 .hero-temp {{ font-family: {PIXEL}; font-size: 3rem; font-weight: 400; line-height: 1.4; color: {yellow}; text-shadow: 0 0 10px rgba(255, 230, 0, 0.7); }}
 .hero-badge {{ font-family: {PIXEL}; font-size: 0.55rem; border: 2px solid {yellow}; border-radius: 0; color: {yellow}; }}
@@ -159,8 +177,11 @@ def _build_retro_css(p: Dict[str, Any]) -> str:
 .aqi-ring {{ box-shadow: 0 0 16px rgba(255, 43, 214, 0.45); }}
 .aqi-ring-inner {{ font-family: {PIXEL}; font-size: 1rem; font-weight: 400; }}
 .stats {{ gap: 0.75rem; border-top: none; }}
-.stat, .stat:first-child {{ padding: 0.6rem 0.9rem; border: 2px solid rgba(0, 240, 255, 0.6); box-shadow: 0 0 10px rgba(0, 240, 255, 0.25); }}
+.stat, .stat:nth-child(3n+1) {{ padding: 0.6rem 0.9rem; border: 2px solid rgba(0, 240, 255, 0.6); box-shadow: 0 0 10px rgba(0, 240, 255, 0.25); }}
 .stat-value {{ font-family: {PIXEL}; font-size: 1.1rem; font-weight: 400; line-height: 1.9; }}
+.stats {{ column-gap: 0.75rem; }}
+.pollutants {{ border-top: none; }}
+.pollutant-dot {{ border-radius: 0; box-shadow: 0 0 6px var(--dot); }}
 .meteo-alert {{ border: 2px solid; box-shadow: 0 0 12px currentColor; }}
 .meteo-alert p {{ font-size: 1.25rem; color: inherit !important; }}
 .meteo-alert strong {{ font-family: {PIXEL}; font-size: 0.65rem; font-weight: 400; }}
@@ -203,16 +224,26 @@ def _aqi_category(aqi: float, p: Dict[str, Any]) -> Tuple[str, str]:
     return AQI_CATEGORIES[-1][1], p["aqi"][-1]
 
 
-def _threshold_color(value: float, key: str, p: Dict[str, Any]) -> str:
-    """Colors a pollutant value according to its warning/danger thresholds."""
+def _threshold_level(value: float, key: str) -> str:
+    """Level of a value against its WHO thresholds: "ok", "warning" or "danger"."""
     if value >= THRESHOLDS[key]["danger"]:
-        color = p["danger"]
-    elif value >= THRESHOLDS[key]["warning"]:
-        color = p["warning"]
-    else:
-        return p["text"]
+        return "danger"
+    if value >= THRESHOLDS[key]["warning"]:
+        return "warning"
+    return "ok"
+
+
+def _level_color(level: str, p: Dict[str, Any]) -> str:
+    """Color of a threshold level, readable in light and dark mode."""
+    color = p[level]
     # Pull the hue toward the text color so it stays readable in light and dark mode
     return f"color-mix(in srgb, {color} 75%, currentColor)" if p["adaptive"] else color
+
+
+def _wind_cardinal(degrees: float) -> str:
+    """8-point French compass label of the direction the wind comes from."""
+    labels = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
+    return labels[int((degrees % 360) / 45 + 0.5) % 8]
 
 
 def _aqi_gauge_html(aqi: float, color: str, p: Dict[str, Any]) -> str:
@@ -225,8 +256,25 @@ def _aqi_gauge_html(aqi: float, color: str, p: Dict[str, Any]) -> str:
     )
 
 
-def _render_hero(city: str, latest: pd.Series, mock_mode: bool, p: Dict[str, Any]) -> None:
-    """Featured block: city, temperature, AQI gauge and secondary stats."""
+def _pollutants_html(latest: pd.Series, p: Dict[str, Any]) -> str:
+    """Strip with the six monitored pollutants, colored against WHO thresholds when defined."""
+    items = []
+    for column, label, threshold_key in POLLUTANTS:
+        value = latest.get(column)
+        if value is None or pd.isna(value):
+            continue
+        level = _threshold_level(value, threshold_key) if threshold_key in THRESHOLDS else "ok"
+        items.append(
+            f'<span class="pollutant"><span class="pollutant-dot" style="--dot: {_level_color(level, p)}"></span>'
+            f'<span class="pollutant-label">{label}</span> {value:.1f}</span>'
+        )
+    return f'<div class="pollutants">{"".join(items)}<span class="pollutants-caption">µg/m³</span></div>'
+
+
+def _render_hero(
+    city: str, latest: pd.Series, today: Optional[pd.Series], badge: str, p: Dict[str, Any]
+) -> None:
+    """Featured block: city, temperatures, AQI gauge, weather tiles and pollutant strip."""
     aqi = latest["us_aqi"]
     if pd.isna(aqi):
         aqi_block = (
@@ -241,17 +289,22 @@ def _render_hero(city: str, latest: pd.Series, mock_mode: bool, p: Dict[str, Any
             f'<div class="hero-aqi-caption">Indice AQI (US)</div></div></div>'
         )
 
-    mock_badge = '<span class="hero-badge">Données simulées</span>' if mock_mode else ""
-    pm25_color = _threshold_color(latest["pm2_5"], "pm2_5", p)
+    temp_details = [f"Ressentie {latest['apparent_temperature']:.0f}°"]
+    if today is not None:
+        temp_details.append(f"min {today['temperature_2m_min']:.0f}° / max {today['temperature_2m_max']:.0f}°")
+    precipitation = today["precipitation_sum"] if today is not None else latest["precipitation"]
+    wind_direction = latest["wind_direction_10m"]
+    # Meteorological convention: the direction the wind comes from; the arrow shows where it blows
+    wind_arrow_angle = (wind_direction + 180) % 360
 
     st.html(f"""
     <div class="hero">
       <div>
-        <div class="hero-date">{_format_french_datetime(latest["datetime"])}{mock_badge}</div>
+        <div class="hero-date">{_format_french_datetime(latest["datetime"])}{badge}</div>
         <div class="hero-city">{city}</div>
         <div class="hero-temp-row">
           <span class="hero-temp">{latest["temperature_2m"]:.0f}°</span>
-          <span class="hero-sub">Vent {latest["windspeed_10m"]:.0f} km/h · {latest["surface_pressure"]:.0f} hPa</span>
+          <span class="hero-sub">{" · ".join(temp_details)}</span>
         </div>
       </div>
       {aqi_block}
@@ -262,14 +315,27 @@ def _render_hero(city: str, latest: pd.Series, mock_mode: bool, p: Dict[str, Any
         <div class="stat-value">{latest["relativehumidity_2m"]:.0f}<span class="stat-unit">%</span></div>
       </div>
       <div class="stat">
-        <div class="stat-label">PM2.5</div>
-        <div class="stat-value" style="color: {pm25_color}">{latest["pm2_5"]:.1f}<span class="stat-unit">µg/m³</span></div>
+        <div class="stat-label">Vent</div>
+        <div class="stat-value">{latest["windspeed_10m"]:.0f}<span class="stat-unit">km/h</span><span class="wind-dir" title="Vent venant de {wind_direction:.0f}°"><span class="wind-arrow" style="transform: rotate({wind_arrow_angle:.0f}deg)">↑</span> {_wind_cardinal(wind_direction)}</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Précipitations du jour</div>
+        <div class="stat-value">{precipitation:.1f}<span class="stat-unit">mm</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Couverture nuageuse</div>
+        <div class="stat-value">{latest["cloud_cover"]:.0f}<span class="stat-unit">%</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Pression</div>
+        <div class="stat-value">{latest["surface_pressure"]:.0f}<span class="stat-unit">hPa</span></div>
       </div>
       <div class="stat">
         <div class="stat-label">Score confort</div>
         <div class="stat-value">{latest["health_score"]:.0f}<span class="stat-unit">/100</span></div>
       </div>
     </div>
+    {_pollutants_html(latest, p)}
     """)
 
 
@@ -540,7 +606,16 @@ def render_dashboard():
     reference_time = DataProcessor.get_reference_time(raw_data)
     latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
-    _render_hero(city_name, latest, mock_mode, palette)
+    daily = DataProcessor.process_daily_data(raw_data)
+    today_date = latest["datetime"].date()
+    today = daily.loc[today_date] if today_date in daily.index else None
+    if mock_mode:
+        badge = '<span class="hero-badge">Données simulées</span>'
+    elif raw_data.get("source") == "mock":
+        badge = '<span class="hero-badge hero-badge--warning">Données simulées : API indisponible</span>'
+    else:
+        badge = ""
+    _render_hero(city_name, latest, today, badge, palette)
     _render_alerts(detect_alerts(df, reference_time))
 
     # Visualizations

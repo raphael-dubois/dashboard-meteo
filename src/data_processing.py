@@ -29,12 +29,21 @@ class DataProcessor:
         return df
 
     @staticmethod
+    def process_daily_data(raw_data: Dict[str, Any]) -> pd.DataFrame:
+        """Daily aggregates (min/max temperature, precipitation total) indexed by calendar date."""
+        daily = pd.DataFrame(raw_data.get("weather", {}).get("daily", {}))
+        if daily.empty:
+            return daily
+        daily["date"] = pd.to_datetime(daily["time"]).dt.date
+        return daily.set_index("date")
+
+    @staticmethod
     def calculate_custom_health_index(df: pd.DataFrame) -> pd.Series:
         """
         Calculates a custom composite Comfort/Health Score (0-100 scale).
-        Higher is better.
+        Higher is better. Uses the apparent ("feels like") temperature when available.
         """
-        temp = df["temperature_2m"]
+        temp = df["apparent_temperature"] if "apparent_temperature" in df else df["temperature_2m"]
         humidity = df["relativehumidity_2m"]
         pm2_5 = df["pm2_5"]
 
