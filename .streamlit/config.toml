@@ -1,15 +1,30 @@
+# Shared settings for both modes. Light/dark follows the system or the Settings menu.
 [theme]
-base = "light"
-primaryColor = "#A84B24"
-backgroundColor = "#F7F4EE"
-secondaryBackgroundColor = "#EFE9DF"
-textColor = "#2B2620"
-borderColor = "#DDD5C7"
 font = "sans-serif"
 headingFont = "serif"
 baseRadius = "small"
 showWidgetBorder = true
 
-[theme.sidebar]
+# Editorial light theme (kept in sync with THEMES["light"] in src/dashboard.py)
+[theme.light]
+primaryColor = "#A84B24"
+backgroundColor = "#F7F4EE"
+secondaryBackgroundColor = "#EFE9DF"
+textColor = "#2B2620"
+borderColor = "#DDD5C7"
+
+[theme.light.sidebar]
 backgroundColor = "#EFE9DF"
 secondaryBackgroundColor = "#F7F4EE"
+
+# Editorial dark theme (kept in sync with THEMES["dark"] in src/dashboard.py)
+[theme.dark]
+primaryColor = "#E0784A"
+backgroundColor = "#1A1714"
+secondaryBackgroundColor = "#24201B"
+textColor = "#EDE6DA"
+borderColor = "#3A342C"
+
+[theme.dark.sidebar]
+backgroundColor = "#211D19"
+secondaryBackgroundColor = "#1A1714"

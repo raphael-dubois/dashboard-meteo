@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly.express as px
@@ -10,27 +10,52 @@ from .alerts import THRESHOLDS, detect_alerts
 from .api_client import WeatherAPIClient, DEFAULT_CITIES, CACHE_TTL_MINUTES
 from .data_processing import DataProcessor
 
-# Editorial palette (kept in sync with .streamlit/config.toml)
-PALETTE = {
-    "text": "#2B2620",
-    "muted": "#857B6E",
-    "line": "#DDD5C7",
-    "grid": "#E6DFD3",
-    "accent": "#A84B24",
-    "slate": "#5B7A99",
-    "ochre": "#C08A3E",
-    "warning": "#A8661A",
-    "danger": "#B3261E",
+# Palettes for the custom blocks and charts.
+# "editorial" adapts to Streamlit's light/dark mode on its own: neutral tones derive from the
+# inherited text color (currentColor), accents are mid tones readable on both backgrounds.
+# Switching mode in the Settings menu does not rerun the script, so no Python-side detection.
+# "retro" is a fixed palette applied on top via CSS.
+THEMES: Dict[str, Dict[str, Any]] = {
+    "editorial": {
+        "adaptive": True,
+        "bg": "transparent", "surface": "transparent",
+        "text": "inherit",
+        "muted": "color-mix(in srgb, currentColor 62%, transparent)",
+        "line": "color-mix(in srgb, currentColor 16%, transparent)",
+        "grid": "color-mix(in srgb, currentColor 12%, transparent)",
+        "accent": "#C2603A", "slate": "#6B8CB0", "ochre": "#C9973F",
+        "warning": "#C9821F", "danger": "#D9443A", "ok": "#6BA34A",
+        "danger_bg": "color-mix(in srgb, #D9443A 14%, transparent)",
+        "danger_fg": "color-mix(in srgb, #D9443A 60%, currentColor)",
+        "warning_bg": "color-mix(in srgb, #C9821F 16%, transparent)",
+        "warning_fg": "color-mix(in srgb, #C9821F 60%, currentColor)",
+        "ok_bg": "color-mix(in srgb, #6BA34A 15%, transparent)",
+        "ok_fg": "color-mix(in srgb, #6BA34A 60%, currentColor)",
+        "aqi": ["#6BA34A", "#D4AE2C", "#E08A35", "#D9443A", "#9A5BB5", "#A3394F"],
+        "map_style": "open-street-map",
+    },
+    "retro": {
+        "adaptive": False,
+        "bg": "#07060F", "surface": "#110D22",
+        "text": "#E9F1FF", "muted": "#9A95C9", "line": "#FF2BD6", "grid": "rgba(0, 240, 255, 0.14)",
+        "accent": "#FF2BD6", "slate": "#00F0FF", "ochre": "#FFE600",
+        "warning": "#FFB000", "danger": "#FF3860", "ok": "#39FF88",
+        "danger_bg": "rgba(255, 56, 96, 0.10)", "danger_fg": "#FF8FA6",
+        "warning_bg": "rgba(255, 176, 0, 0.10)", "warning_fg": "#FFD37A",
+        "ok_bg": "rgba(57, 255, 136, 0.08)", "ok_fg": "#9DFFC4",
+        "aqi": ["#39FF88", "#FFE600", "#FFB000", "#FF3860", "#C04BFF", "#FF2BD6"],
+        "map_style": "carto-darkmatter",
+    },
 }
 
-# US AQI categories: (upper bound, label, color)
+# US AQI categories: (upper bound, label); colors come from the active palette
 AQI_CATEGORIES = [
-    (50, "Air de bonne qualité", "#5B8C3A"),
-    (100, "Qualité de l'air modérée", "#C9A227"),
-    (150, "Mauvais pour les personnes sensibles", "#D9822B"),
-    (200, "Air de mauvaise qualité", "#B3261E"),
-    (300, "Air de très mauvaise qualité", "#7B3F8C"),
-    (float("inf"), "Air dangereux", "#6E1E2B"),
+    (50, "Air de bonne qualité"),
+    (100, "Qualité de l'air modérée"),
+    (150, "Mauvais pour les personnes sensibles"),
+    (200, "Air de mauvaise qualité"),
+    (300, "Air de très mauvaise qualité"),
+    (float("inf"), "Air dangereux"),
 ]
 
 FRENCH_DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -39,41 +64,122 @@ FRENCH_MONTHS = [
     "juillet", "août", "septembre", "octobre", "novembre", "décembre"
 ]
 
-DASHBOARD_CSS = f"""
-<style>
-.masthead {{ border-bottom: 1px solid {PALETTE["line"]}; padding-bottom: 0.75rem; margin-bottom: 0.5rem; }}
-.masthead-title {{ font-family: "Source Serif 4", "Source Serif Pro", Georgia, serif; font-size: 1.35rem; color: {PALETTE["text"]}; }}
-.masthead-sub {{ font-size: 0.85rem; color: {PALETTE["muted"]}; }}
+SERIF = '"Source Serif 4", "Source Serif Pro", Georgia, serif'
+PIXEL = '"Press Start 2P", monospace'
+TERMINAL = '"VT323", monospace'
+
+
+def _build_css(p: Dict[str, Any]) -> str:
+    """Styles of the custom blocks (masthead, hero, stats, alerts) for a palette."""
+    return f"""
+.masthead {{ border-bottom: 1px solid {p["line"]}; padding-bottom: 0.75rem; margin-bottom: 0.5rem; }}
+.masthead-title {{ font-family: {SERIF}; font-size: 1.35rem; color: {p["text"]}; }}
+.masthead-sub {{ font-size: 0.85rem; color: {p["muted"]}; }}
 .hero {{ display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 2rem; align-items: center; padding: 1.25rem 0 1rem; }}
-.hero-date {{ font-size: 0.85rem; color: {PALETTE["muted"]}; }}
-.hero-city {{ font-family: "Source Serif 4", "Source Serif Pro", Georgia, serif; font-size: 2.75rem; line-height: 1.15; color: {PALETTE["text"]}; }}
+.hero-date {{ font-size: 0.85rem; color: {p["muted"]}; }}
+.hero-city {{ font-family: {SERIF}; font-size: 2.75rem; line-height: 1.15; color: {p["text"]}; }}
 .hero-temp-row {{ display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }}
-.hero-temp {{ font-size: 4.25rem; font-weight: 600; line-height: 1.05; color: {PALETTE["text"]}; }}
-.hero-sub {{ font-size: 0.95rem; color: {PALETTE["muted"]}; }}
-.hero-badge {{ display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.5rem; border: 1px solid {PALETTE["line"]}; border-radius: 4px; font-size: 0.75rem; color: {PALETTE["muted"]}; }}
+.hero-temp {{ font-size: 4.25rem; font-weight: 600; line-height: 1.05; color: {p["text"]}; }}
+.hero-sub {{ font-size: 0.95rem; color: {p["muted"]}; }}
+.hero-badge {{ display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.5rem; border: 1px solid {p["line"]}; border-radius: 4px; font-size: 0.75rem; color: {p["muted"]}; }}
 .hero-aqi {{ display: flex; align-items: center; gap: 1rem; }}
-.aqi-ring {{ flex: none; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; }}
-.aqi-ring-inner {{ width: 78px; height: 78px; border-radius: 50%; background: #F7F4EE; display: grid; place-items: center; font-size: 1.4rem; font-weight: 600; color: {PALETTE["text"]}; }}
-.hero-aqi-label {{ font-size: 1.05rem; font-weight: 600; color: {PALETTE["text"]}; }}
-.hero-aqi-caption {{ font-size: 0.85rem; color: {PALETTE["muted"]}; }}
-.stats {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid {PALETTE["line"]}; padding-top: 0.9rem; margin-bottom: 1.25rem; }}
-.stat {{ padding: 0 1.25rem; border-left: 1px solid {PALETTE["line"]}; }}
+.aqi-ring {{ flex: none; position: relative; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; }}
+.aqi-ring::before {{ content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--aqi-fill); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 9px)); mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 9px)); }}
+.aqi-ring-inner {{ position: relative; font-size: 1.4rem; font-weight: 600; color: {p["text"]}; }}
+.hero-aqi-label {{ font-size: 1.05rem; font-weight: 600; color: {p["text"]}; }}
+.hero-aqi-caption {{ font-size: 0.85rem; color: {p["muted"]}; }}
+.stats {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid {p["line"]}; padding-top: 0.9rem; margin-bottom: 1.25rem; }}
+.stat {{ padding: 0 1.25rem; border-left: 1px solid {p["line"]}; }}
 .stat:first-child {{ padding-left: 0; border-left: none; }}
-.stat-label {{ font-size: 0.85rem; color: {PALETTE["muted"]}; }}
-.stat-value {{ font-size: 1.6rem; font-weight: 600; color: {PALETTE["text"]}; }}
-.stat-unit {{ font-size: 0.9rem; font-weight: 400; color: {PALETTE["muted"]}; margin-left: 0.25rem; }}
+.stat-label {{ font-size: 0.85rem; color: {p["muted"]}; }}
+.stat-value {{ font-size: 1.6rem; font-weight: 600; color: {p["text"]}; }}
+.stat-unit {{ font-size: 0.9rem; font-weight: 400; color: {p["muted"]}; margin-left: 0.25rem; }}
 .meteo-alert {{ border-left: 3px solid; border-radius: 0; padding: 0.65rem 1rem; margin-bottom: 0.6rem; }}
 .meteo-alert p {{ margin: 0; }}
-.meteo-alert--danger {{ border-color: {PALETTE["danger"]}; background: #F7E4E0; color: #7A1A14; }}
-.meteo-alert--warning {{ border-color: {PALETTE["warning"]}; background: #F8EDD9; color: #6B4510; }}
-.meteo-alert--ok {{ border-color: #5B8C3A; background: #E9EFDF; color: #34501F; }}
+.meteo-alert--danger {{ border-color: {p["danger"]}; background: {p["danger_bg"]}; color: {p["danger_fg"]}; }}
+.meteo-alert--warning {{ border-color: {p["warning"]}; background: {p["warning_bg"]}; color: {p["warning_fg"]}; }}
+.meteo-alert--ok {{ border-color: {p["ok"]}; background: {p["ok_bg"]}; color: {p["ok_fg"]}; }}
 @media (max-width: 640px) {{
   .hero {{ grid-template-columns: 1fr; gap: 1.25rem; }}
   .stats {{ grid-template-columns: 1fr; gap: 0.75rem; }}
   .stat {{ padding-left: 0; border-left: none; }}
 }}
-</style>
 """
+
+
+def _build_retro_css(p: Dict[str, Any]) -> str:
+    """Arcade neon overrides: pixel fonts, glows, scanlines and native Streamlit widgets."""
+    cyan, magenta, yellow = p["slate"], p["accent"], p["ochre"]
+    return f"""
+.stApp {{
+  background-color: {p["bg"]};
+  background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+}}
+[data-testid="stHeader"] {{ background: transparent; }}
+[data-testid="stSidebar"] {{ border-right: 2px solid {magenta}; box-shadow: 0 0 18px rgba(255, 43, 214, 0.35); }}
+[data-testid="stSidebar"] > div:first-child {{ background: #0D0A1C; }}
+[data-testid="stSidebar"] hr {{ border-color: rgba(255, 43, 214, 0.4); }}
+.stApp p, .stApp label, .stApp li, .stApp input {{
+  font-family: {TERMINAL} !important; color: {p["text"]};
+}}
+.stApp p, .stApp label, .stApp li {{ font-size: 1.2rem; }}
+.stApp h1, .stApp h2, .stApp h3 {{
+  font-family: {PIXEL} !important; font-size: 1rem !important; line-height: 1.7;
+  color: {cyan}; text-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+}}
+[data-testid="stCaptionContainer"] p {{ color: {p["muted"]}; }}
+[data-testid="stTabs"] [role="tablist"] {{ border-bottom-color: rgba(255, 43, 214, 0.3) !important; }}
+[data-testid="stTab"] p {{ font-family: {PIXEL} !important; font-size: 0.65rem; }}
+[data-testid="stTab"][aria-selected="true"] {{ border-bottom-color: {magenta} !important; box-shadow: 0 6px 8px -6px {magenta}; }}
+[data-testid="stTab"][aria-selected="true"] p {{ color: {magenta}; text-shadow: 0 0 6px {magenta}; }}
+[data-testid="stSelectbox"] [role="group"] {{ background: {p["surface"]} !important; border: 2px solid {cyan} !important; border-radius: 0 !important; color: {p["text"]}; }}
+[data-testid="stSelectbox"] [role="group"] * {{ color: inherit !important; font-family: {TERMINAL} !important; font-size: 1.15rem; }}
+[data-testid="stCheckbox"] label > div:first-of-type {{ background: rgba(255, 255, 255, 0.15) !important; border-radius: 0 !important; }}
+[data-testid="stCheckbox"] label > div:first-of-type > div {{ background: {p["text"]} !important; border-radius: 0 !important; }}
+[data-testid="stCheckbox"] label[data-selected] > div:first-of-type {{ background: {magenta} !important; box-shadow: 0 0 8px {magenta}; }}
+.stApp hr {{ border-color: rgba(255, 43, 214, 0.4); }}
+.stApp [data-testid="stDownloadButton"] button, .stApp [data-testid="stButton"] button {{
+  background: transparent !important; border: 2px solid {cyan} !important; border-radius: 0 !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+}}
+.stApp [data-testid="stDownloadButton"] button p, .stApp [data-testid="stButton"] button p {{
+  font-family: {PIXEL} !important; font-size: 0.65rem; color: {cyan};
+}}
+.stApp [data-testid="stDownloadButton"] button:hover, .stApp [data-testid="stButton"] button:hover {{
+  border-color: {magenta} !important; box-shadow: 0 0 14px {magenta};
+}}
+.stApp [data-testid="stDownloadButton"] button:hover p, .stApp [data-testid="stButton"] button:hover p {{ color: {magenta}; }}
+.masthead {{ border-bottom: 2px solid {magenta}; box-shadow: 0 6px 12px -8px {magenta}; }}
+.masthead-title {{ font-family: {PIXEL}; font-size: 0.95rem; line-height: 1.8; color: {cyan}; text-shadow: 0 0 8px rgba(0, 240, 255, 0.7); }}
+.masthead-sub, .hero-date, .hero-sub, .hero-aqi-caption, .stat-label, .stat-unit {{ font-family: {TERMINAL}; font-size: 1.15rem; }}
+.hero-city {{ font-family: {PIXEL}; font-size: 2rem; line-height: 1.5; color: {magenta}; text-shadow: 0 0 10px {magenta}, 0 0 24px rgba(255, 43, 214, 0.5); }}
+.hero-temp {{ font-family: {PIXEL}; font-size: 3rem; font-weight: 400; line-height: 1.4; color: {yellow}; text-shadow: 0 0 10px rgba(255, 230, 0, 0.7); }}
+.hero-badge {{ font-family: {PIXEL}; font-size: 0.55rem; border: 2px solid {yellow}; border-radius: 0; color: {yellow}; }}
+.hero-aqi-label {{ font-family: {PIXEL}; font-size: 0.75rem; font-weight: 400; line-height: 1.7; }}
+.aqi-ring {{ box-shadow: 0 0 16px rgba(255, 43, 214, 0.45); }}
+.aqi-ring-inner {{ font-family: {PIXEL}; font-size: 1rem; font-weight: 400; }}
+.stats {{ gap: 0.75rem; border-top: none; }}
+.stat, .stat:first-child {{ padding: 0.6rem 0.9rem; border: 2px solid rgba(0, 240, 255, 0.6); box-shadow: 0 0 10px rgba(0, 240, 255, 0.25); }}
+.stat-value {{ font-family: {PIXEL}; font-size: 1.1rem; font-weight: 400; line-height: 1.9; }}
+.meteo-alert {{ border: 2px solid; box-shadow: 0 0 12px currentColor; }}
+.meteo-alert p {{ font-size: 1.25rem; color: inherit !important; }}
+.meteo-alert strong {{ font-family: {PIXEL}; font-size: 0.65rem; font-weight: 400; }}
+"""
+
+
+def _get_theme_name(retro_mode: bool) -> str:
+    """Active palette: retro if toggled, otherwise the editorial palette (light and dark)."""
+    return "retro" if retro_mode else "editorial"
+
+
+def _inject_styles(theme_name: str) -> None:
+    """Injects the CSS for the active palette."""
+    p = THEMES[theme_name]
+    css = _build_css(p)
+    if theme_name == "retro":
+        fonts = "@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');"
+        css = fonts + css + _build_retro_css(p)
+    st.html(f"<style>{css}</style>")
 
 
 def _format_french_datetime(ts: pd.Timestamp) -> str:
@@ -89,34 +195,37 @@ def _format_coordinates(lat: float, lon: float) -> str:
     return f"{abs(lat):.2f}° {lat_ref} · {abs(lon):.2f}° {lon_ref}"
 
 
-def _aqi_category(aqi: float) -> Tuple[str, str]:
+def _aqi_category(aqi: float, p: Dict[str, Any]) -> Tuple[str, str]:
     """Returns the (label, color) pair of the US AQI category."""
-    for upper_bound, label, color in AQI_CATEGORIES:
+    for (upper_bound, label), color in zip(AQI_CATEGORIES, p["aqi"]):
         if aqi <= upper_bound:
             return label, color
-    return AQI_CATEGORIES[-1][1], AQI_CATEGORIES[-1][2]
+    return AQI_CATEGORIES[-1][1], p["aqi"][-1]
 
 
-def _threshold_color(value: float, key: str) -> str:
+def _threshold_color(value: float, key: str, p: Dict[str, Any]) -> str:
     """Colors a pollutant value according to its warning/danger thresholds."""
     if value >= THRESHOLDS[key]["danger"]:
-        return PALETTE["danger"]
-    if value >= THRESHOLDS[key]["warning"]:
-        return PALETTE["warning"]
-    return PALETTE["text"]
+        color = p["danger"]
+    elif value >= THRESHOLDS[key]["warning"]:
+        color = p["warning"]
+    else:
+        return p["text"]
+    # Pull the hue toward the text color so it stays readable in light and dark mode
+    return f"color-mix(in srgb, {color} 75%, currentColor)" if p["adaptive"] else color
 
 
-def _aqi_gauge_html(aqi: float, color: str) -> str:
-    """Ring gauge for the US AQI (0-300 scale, capped). Pure CSS: st.html strips SVG."""
+def _aqi_gauge_html(aqi: float, color: str, p: Dict[str, Any]) -> str:
+    """Ring gauge for the US AQI (0-300 scale, capped). Pure CSS (masked conic gradient): st.html strips SVG."""
     percent = min(max(aqi, 0) / 300, 1) * 100
     return (
         f'<div class="aqi-ring" role="img" aria-label="AQI {int(aqi)}" '
-        f'style="background: conic-gradient({color} 0 {percent:.1f}%, {PALETTE["grid"]} {percent:.1f}% 100%)">'
+        f'style="--aqi-fill: conic-gradient({color} 0 {percent:.1f}%, {p["grid"]} {percent:.1f}% 100%)">'
         f'<div class="aqi-ring-inner">{int(aqi)}</div></div>'
     )
 
 
-def _render_hero(city: str, latest: pd.Series, mock_mode: bool) -> None:
+def _render_hero(city: str, latest: pd.Series, mock_mode: bool, p: Dict[str, Any]) -> None:
     """Featured block: city, temperature, AQI gauge and secondary stats."""
     aqi = latest["us_aqi"]
     if pd.isna(aqi):
@@ -125,15 +234,15 @@ def _render_hero(city: str, latest: pd.Series, mock_mode: bool) -> None:
             '<div class="hero-aqi-caption">Indice AQI (US)</div></div></div>'
         )
     else:
-        aqi_label, aqi_color = _aqi_category(aqi)
+        aqi_label, aqi_color = _aqi_category(aqi, p)
         aqi_block = (
-            f'<div class="hero-aqi">{_aqi_gauge_html(aqi, aqi_color)}'
+            f'<div class="hero-aqi">{_aqi_gauge_html(aqi, aqi_color, p)}'
             f'<div><div class="hero-aqi-label">{aqi_label}</div>'
             f'<div class="hero-aqi-caption">Indice AQI (US)</div></div></div>'
         )
 
     mock_badge = '<span class="hero-badge">Données simulées</span>' if mock_mode else ""
-    pm25_color = _threshold_color(latest["pm2_5"], "pm2_5")
+    pm25_color = _threshold_color(latest["pm2_5"], "pm2_5", p)
 
     st.html(f"""
     <div class="hero">
@@ -165,7 +274,7 @@ def _render_hero(city: str, latest: pd.Series, mock_mode: bool) -> None:
 
 
 def _render_alerts(alerts: List[Dict[str, str]]) -> None:
-    """Editorial alert banners (left accent border, Material icon)."""
+    """Alert banners (accent border, Material icon)."""
     if not alerts:
         alerts = [{
             "level": "ok",
@@ -188,46 +297,60 @@ def _render_alerts(alerts: List[Dict[str, str]]) -> None:
         )
 
 
-def _style_figure(fig: go.Figure, height: int = 420) -> go.Figure:
-    """Applies the editorial look to a Plotly figure."""
+def _style_figure(fig: go.Figure, p: Dict[str, Any], retro: bool, height: int = 420) -> go.Figure:
+    """
+    Layout shared by the charts. In editorial mode, text and grid colors are left to
+    Streamlit's chart theme so they follow light/dark switches; retro sets everything.
+    """
     fig.update_layout(
         height=height,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=PALETTE["text"], size=13),
         margin=dict(l=64, r=64, t=48, b=48),
         hovermode="x unified",
-        hoverlabel=dict(bgcolor="#FFFDF9", bordercolor=PALETTE["line"], font_color=PALETTE["text"]),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title_text=""),
     )
-    fig.update_xaxes(
-        showgrid=False, linecolor=PALETTE["line"], ticks="outside", tickcolor=PALETTE["line"],
-        tickformat="%d/%m\n%Hh", automargin=True,
-    )
-    fig.update_yaxes(gridcolor=PALETTE["grid"], zeroline=False, title_font_color=PALETTE["muted"], automargin=True)
+    fig.update_xaxes(showgrid=False, ticks="outside", tickformat="%d/%m\n%Hh", automargin=True)
+    fig.update_yaxes(zeroline=False, automargin=True)
+    if retro:
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color=p["text"], family=TERMINAL.replace('"', ""), size=17),
+            hoverlabel=dict(bgcolor=p["surface"], bordercolor=p["line"], font_color=p["text"]),
+        )
+        fig.update_xaxes(linecolor=p["line"], tickcolor=p["line"])
+        fig.update_yaxes(gridcolor=p["grid"], title_font_color=p["muted"])
     return fig
 
 
-def _weather_figure(df: pd.DataFrame) -> go.Figure:
+def _add_line(
+    fig: go.Figure, x: pd.Series, y: pd.Series, name: str, color: str, width: float,
+    hovertemplate: str, retro: bool, dash: Optional[str] = None, secondary_y: Optional[bool] = None,
+) -> None:
+    """Adds a line trace; in retro mode a wide translucent copy underneath fakes a neon glow."""
+    extra = {} if secondary_y is None else {"secondary_y": secondary_y}
+    if retro:
+        fig.add_trace(go.Scatter(
+            x=x, y=y, line=dict(color=color, width=width * 4), opacity=0.22,
+            showlegend=False, hoverinfo="skip",
+        ), **extra)
+    fig.add_trace(go.Scatter(
+        x=x, y=y, name=name, line=dict(color=color, width=width, dash=dash),
+        hovertemplate=hovertemplate,
+    ), **extra)
+
+
+def _weather_figure(df: pd.DataFrame, p: Dict[str, Any], retro: bool) -> go.Figure:
     """Temperature and humidity on two y-axes (different units)."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(
-        go.Scatter(
-            x=df["datetime"], y=df["temperature_2m"], name="Température",
-            line=dict(color=PALETTE["accent"], width=2.5),
-            hovertemplate="%{y:.1f} °C<extra></extra>",
-        ),
-        secondary_y=False,
+    _add_line(
+        fig, df["datetime"], df["temperature_2m"], "Température", p["accent"], 2.5,
+        "%{y:.1f} °C<extra></extra>", retro, secondary_y=False,
     )
-    fig.add_trace(
-        go.Scatter(
-            x=df["datetime"], y=df["relativehumidity_2m"], name="Humidité",
-            line=dict(color=PALETTE["slate"], width=1.5, dash="dot"),
-            hovertemplate="%{y:.0f} %<extra></extra>",
-        ),
-        secondary_y=True,
+    _add_line(
+        fig, df["datetime"], df["relativehumidity_2m"], "Humidité", p["slate"], 1.5,
+        "%{y:.0f} %<extra></extra>", retro, dash="dot", secondary_y=True,
     )
-    _style_figure(fig)
+    _style_figure(fig, p, retro)
     fig.update_yaxes(title_text="Température (°C)", secondary_y=False)
     fig.update_yaxes(
         title_text="Humidité (%)", range=[0, 100], tickmode="linear", tick0=0, dtick=20,
@@ -236,28 +359,24 @@ def _weather_figure(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def _pollutants_figure(df: pd.DataFrame) -> go.Figure:
+def _pollutants_figure(df: pd.DataFrame, p: Dict[str, Any], retro: bool) -> go.Figure:
     """Key pollutant concentrations over the whole period."""
     series = [
-        ("pm2_5", "PM2.5", PALETTE["accent"]),
-        ("pm10", "PM10", PALETTE["ochre"]),
-        ("nitrogen_dioxide", "NO₂", PALETTE["slate"]),
+        ("pm2_5", "PM2.5", p["accent"]),
+        ("pm10", "PM10", p["ochre"]),
+        ("nitrogen_dioxide", "NO₂", p["slate"]),
     ]
     fig = go.Figure()
     for column, name, color in series:
-        fig.add_trace(go.Scatter(
-            x=df["datetime"], y=df[column], name=name,
-            line=dict(color=color, width=2),
-            hovertemplate="%{y:.1f} µg/m³<extra></extra>",
-        ))
-    _style_figure(fig)
+        _add_line(fig, df["datetime"], df[column], name, color, 2, "%{y:.1f} µg/m³<extra></extra>", retro)
+    _style_figure(fig, p, retro)
     fig.update_layout(margin_r=16)
     fig.update_yaxes(title_text="Concentration (µg/m³)", rangemode="tozero")
     return fig
 
 
-def _render_sidebar() -> Tuple[str, bool]:
-    """Sidebar: location and data source settings. Returns (city, mock_mode)."""
+def _render_sidebar() -> Tuple[str, bool, bool]:
+    """Sidebar: location, data source and appearance. Returns (city, mock_mode, retro_mode)."""
     with st.sidebar:
         st.subheader(":material/location_on: Lieu")
         selected_city = st.selectbox("Ville", list(DEFAULT_CITIES.keys()))
@@ -274,11 +393,19 @@ def _render_sidebar() -> Tuple[str, bool]:
         st.caption(f"Cache local des réponses API : {CACHE_TTL_MINUTES} min")
 
         st.divider()
+        st.subheader(":material/palette: Apparence")
+        retro_mode = st.toggle(
+            "Mode rétro gaming",
+            value=False,
+            help="Style arcade néon. Les modes clair et sombre se choisissent dans le menu Settings.",
+        )
+
+        st.divider()
         st.caption(
             "Sources : Open-Meteo (prévisions et qualité de l'air). "
             "Seuils d'alerte : recommandations de l'OMS."
         )
-    return selected_city, mock_mode
+    return selected_city, mock_mode, retro_mode
 
 
 def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
@@ -318,7 +445,11 @@ def render_dashboard():
     Author: Student C (Lead UI/UX)
     """
     st.set_page_config(page_title="Dashboard Météo & AQI", page_icon=":material/partly_cloudy_day:", layout="wide")
-    st.html(DASHBOARD_CSS)
+
+    selected_city, mock_mode, retro_mode = _render_sidebar()
+    theme_name = _get_theme_name(retro_mode)
+    palette = THEMES[theme_name]
+    _inject_styles(theme_name)
 
     st.html("""
     <div class="masthead">
@@ -328,7 +459,6 @@ def render_dashboard():
     """)
 
     client = WeatherAPIClient()
-    selected_city, mock_mode = _render_sidebar()
     city_info = DEFAULT_CITIES[selected_city]
 
     # Fetch Data
@@ -345,7 +475,7 @@ def render_dashboard():
     reference_time = DataProcessor.get_reference_time(raw_data)
     latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
-    _render_hero(selected_city, latest, mock_mode)
+    _render_hero(selected_city, latest, mock_mode, palette)
     _render_alerts(detect_alerts(df, reference_time))
 
     # Visualizations
@@ -358,12 +488,12 @@ def render_dashboard():
     with tab1:
         st.subheader("Température et humidité")
         st.caption("Série horaire sur la période couverte par les API (historique récent et prévisions).")
-        st.plotly_chart(_weather_figure(df), width="stretch", theme=None)
+        st.plotly_chart(_weather_figure(df, palette, retro_mode), width="stretch", theme=None if retro_mode else "streamlit")
 
     with tab2:
         st.subheader("Concentration des polluants clés")
         st.caption("PM2.5, PM10 et dioxyde d'azote, en µg/m³.")
-        st.plotly_chart(_pollutants_figure(df), width="stretch", theme=None)
+        st.plotly_chart(_pollutants_figure(df, palette, retro_mode), width="stretch", theme=None if retro_mode else "streamlit")
 
     with tab3:
         st.subheader("Localisation de la station de suivi")
@@ -375,9 +505,9 @@ def render_dashboard():
         }])
         fig_map = px.scatter_map(
             map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
-            color_discrete_sequence=[PALETTE["accent"]], zoom=12, height=600,
+            color_discrete_sequence=[palette["accent"]], zoom=12, height=600,
             center={"lat": city_info["lat"], "lon": city_info["lon"]},
-            map_style="open-street-map"
+            map_style=palette["map_style"]
         )
         fig_map.update_traces(marker=dict(size=18))
         st.plotly_chart(fig_map, width="stretch")
