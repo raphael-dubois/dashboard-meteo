@@ -33,6 +33,7 @@ THEMES: Dict[str, Dict[str, Any]] = {
         "ok_bg": "color-mix(in srgb, #6BA34A 15%, transparent)",
         "ok_fg": "color-mix(in srgb, #6BA34A 60%, currentColor)",
         "aqi": ["#6BA34A", "#D4AE2C", "#E08A35", "#D9443A", "#9A5BB5", "#A3394F"],
+        "series": ["#C2603A", "#6B8CB0", "#C9973F", "#6BA34A", "#9A5BB5", "#3E9C9A", "#D9443A", "#8A8F98"],
         "map_style": "open-street-map",
     },
     "retro": {
@@ -45,6 +46,7 @@ THEMES: Dict[str, Dict[str, Any]] = {
         "warning_bg": "rgba(255, 176, 0, 0.10)", "warning_fg": "#FFD37A",
         "ok_bg": "rgba(57, 255, 136, 0.08)", "ok_fg": "#9DFFC4",
         "aqi": ["#39FF88", "#FFE600", "#FFB000", "#FF3860", "#C04BFF", "#FF2BD6"],
+        "series": ["#FF2BD6", "#00F0FF", "#FFE600", "#39FF88", "#C04BFF", "#FF8A00", "#FF3860", "#9A95C9"],
         "map_style": "carto-darkmatter",
     },
 }
@@ -402,7 +404,7 @@ def _style_figure(fig: go.Figure, p: Dict[str, Any], retro: bool, height: int = 
     """
     fig.update_layout(
         height=height,
-        margin=dict(l=64, r=64, t=48, b=48),
+        margin=dict(l=64, r=24, t=56, b=48),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title_text=""),
     )
@@ -422,55 +424,102 @@ def _style_figure(fig: go.Figure, p: Dict[str, Any], retro: bool, height: int = 
 
 def _add_line(
     fig: go.Figure, x: pd.Series, y: pd.Series, name: str, color: str, width: float,
-    hovertemplate: str, retro: bool, dash: Optional[str] = None, secondary_y: Optional[bool] = None,
+    hovertemplate: str, retro: bool, **position: Any,
 ) -> None:
-    """Adds a line trace; in retro mode a wide translucent copy underneath fakes a neon glow."""
-    extra = {} if secondary_y is None else {"secondary_y": secondary_y}
+    """Adds a line trace (position: subplot row/col); in retro mode a translucent copy fakes a neon glow."""
     if retro:
         fig.add_trace(go.Scatter(
             x=x, y=y, line=dict(color=color, width=width * 4), opacity=0.22,
             showlegend=False, hoverinfo="skip",
-        ), **extra)
+        ), **position)
     fig.add_trace(go.Scatter(
-        x=x, y=y, name=name, line=dict(color=color, width=width, dash=dash),
+        x=x, y=y, name=name, line=dict(color=color, width=width),
         hovertemplate=hovertemplate,
-    ), **extra)
+    ), **position)
 
 
-def _weather_figure(df: pd.DataFrame, p: Dict[str, Any], retro: bool) -> go.Figure:
-    """Temperature and humidity on two y-axes (different units)."""
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    _add_line(
-        fig, df["datetime"], df["temperature_2m"], "Température", p["accent"], 2.5,
-        "%{y:.1f} °C<extra></extra>", retro, secondary_y=False,
+def _panel_groups(columns: List[str]) -> Dict[str, List[str]]:
+    """Groups the selected metrics by unit (one panel per unit; CO alone, its values are 10x larger)."""
+    groups: Dict[str, List[str]] = {}
+    for column in columns:
+        key = "co" if column == "carbon_monoxide" else METRICS[column][1]
+        groups.setdefault(key, []).append(column)
+    return groups
+
+
+def _panel_title(columns: List[str]) -> str:
+    """Panel title from its metrics, e.g. 'Température / Ressentie (°C)'."""
+    unit = METRICS[columns[0]][1]
+    labels = " / ".join(METRICS[column][0] for column in columns)
+    return f"{labels} ({unit})" if unit and unit != "/100" else labels
+
+
+def _metrics_figure(
+    df: pd.DataFrame, columns: List[str], now: pd.Timestamp, p: Dict[str, Any], retro: bool
+) -> go.Figure:
+    """
+    Stacked panels sharing the time axis, one per unit, so that each metric keeps a
+    readable scale. The forecast period is shaded after the "Maintenant" marker.
+    """
+    groups = list(_panel_groups(columns).values())
+    fig = make_subplots(
+        rows=len(groups), cols=1, shared_xaxes=True, vertical_spacing=0.12 / len(groups),
+        subplot_titles=[_panel_title(group) for group in groups],
     )
-    _add_line(
-        fig, df["datetime"], df["relativehumidity_2m"], "Humidité", p["slate"], 1.5,
-        "%{y:.0f} %<extra></extra>", retro, dash="dot", secondary_y=True,
+    catalog = list(METRICS)
+    for row, group in enumerate(groups, start=1):
+        for column in group:
+            label, unit, decimals = METRICS[column]
+            # Fixed color per metric, so a curve keeps its color whatever the selection
+            color = p["series"][catalog.index(column) % len(p["series"])]
+            hovertemplate = f"%{{y:.{decimals}f}} {unit}<extra>{label}</extra>"
+            if column == "precipitation":
+                fig.add_trace(go.Bar(
+                    x=df["datetime"], y=df[column], name=label, marker_color=color,
+                    hovertemplate=hovertemplate,
+                ), row=row, col=1)
+            else:
+                _add_line(fig, df["datetime"], df[column], label, color, 2, hovertemplate, retro, row=row, col=1)
+
+    _style_figure(fig, p, retro, height=110 + 230 * len(groups))
+    fig.update_layout(
+        margin_t=90,
+        legend=dict(yref="container", y=0.995, yanchor="top", orientation="h", x=0, xanchor="left"),
     )
-    _style_figure(fig, p, retro)
-    fig.update_yaxes(title_text="Température (°C)", secondary_y=False)
-    fig.update_yaxes(
-        title_text="Humidité (%)", range=[0, 100], tickmode="linear", tick0=0, dtick=20,
-        showgrid=False, secondary_y=True,
-    )
+    for annotation in fig.layout.annotations:
+        annotation.update(x=0, xanchor="left", font=dict(size=13))
+
+    # Observations / forecasts boundary
+    start, end = df["datetime"].min(), df["datetime"].max()
+    if start <= now < end:
+        shade = "rgba(0, 240, 255, 0.06)" if retro else "rgba(128, 128, 128, 0.12)"
+        fig.add_shape(type="rect", xref="x", yref="paper", x0=now, x1=end, y0=0, y1=1,
+                      fillcolor=shade, line_width=0, layer="below")
+        fig.add_shape(type="line", xref="x", yref="paper", x0=now, x1=now, y0=0, y1=1,
+                      line=dict(color=p["muted"] if retro else "rgba(128, 128, 128, 0.7)", width=1, dash="dot"))
+        fig.add_annotation(x=now, y=1, xref="x", yref="paper", yanchor="bottom", xanchor="left",
+                           text="Maintenant · prévisions", showarrow=False, font=dict(size=12))
     return fig
 
 
-def _pollutants_figure(df: pd.DataFrame, p: Dict[str, Any], retro: bool) -> go.Figure:
-    """Key pollutant concentrations over the whole period."""
-    series = [
-        ("pm2_5", "PM2.5", p["accent"]),
-        ("pm10", "PM10", p["ochre"]),
-        ("nitrogen_dioxide", "NO₂", p["slate"]),
-    ]
-    fig = go.Figure()
-    for column, name, color in series:
-        _add_line(fig, df["datetime"], df[column], name, color, 2, "%{y:.1f} µg/m³<extra></extra>", retro)
-    _style_figure(fig, p, retro)
-    fig.update_layout(margin_r=16)
-    fig.update_yaxes(title_text="Concentration (µg/m³)", rangemode="tozero")
-    return fig
+def _render_metric_chart(
+    df: pd.DataFrame, options: List[str], default: List[str], key: str,
+    now: pd.Timestamp, p: Dict[str, Any], retro: bool,
+) -> None:
+    """Metric picker (pills) above a small-multiples chart."""
+    selected = st.pills(
+        "Courbes affichées", options, default=default, selection_mode="multi",
+        format_func=lambda column: METRICS[column][0], key=key,
+    )
+    if not selected:
+        st.info("Sélectionne au moins une courbe à afficher.", icon=":material/info:")
+        return
+    # Keep the catalog order so panels do not move around when the selection changes
+    ordered = [column for column in options if column in selected]
+    st.plotly_chart(
+        _metrics_figure(df, ordered, now, p, retro),
+        width="stretch", theme=None if retro else "streamlit",
+    )
 
 
 def _format_signed(value: float, decimals: int) -> str:
@@ -525,10 +574,30 @@ def _render_statistics(df: pd.DataFrame, reference_time: Optional[datetime.datet
     )
 
 
-def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
-    """Sidebar: location search, data source and appearance. Returns (city_info, mock_mode, retro_mode).
+def _select_period(df: pd.DataFrame) -> Tuple[datetime.date, datetime.date]:
+    """Date range picker bounded by the available data (7 days of history, forecasts)."""
+    first, last = df["datetime"].min().date(), df["datetime"].max().date()
+    st.divider()
+    st.subheader(":material/date_range: Période")
+    selection = st.date_input(
+        "Période affichée", value=(first, last), min_value=first, max_value=last,
+        format="DD/MM/YYYY", label_visibility="collapsed",
+    )
+    st.caption(f"Historique de 7 jours et prévisions jusqu'au {last:%d/%m}.")
+    # While picking, Streamlit returns only the start date
+    if isinstance(selection, tuple):
+        if not selection:
+            return first, last
+        return selection[0], selection[-1]
+    return selection, selection
 
-    city_info is a dict with keys: name, lat, lon.
+
+def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool, Any]:
+    """Sidebar: location search, data source and appearance.
+    Returns (city_info, mock_mode, retro_mode, period_slot).
+
+    city_info is a dict with keys: name, lat, lon. period_slot is an empty sidebar container,
+    filled once the data is loaded since the selectable dates depend on it.
     """
     # Initialise session state for the city search
     if "city_search_results" not in st.session_state:
@@ -592,6 +661,7 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
 
         city_info = st.session_state.selected_city_info
         st.caption(_format_coordinates(city_info["lat"], city_info["lon"]))
+        period_slot = st.container()
 
         st.divider()
         st.subheader(":material/database: Données")
@@ -615,7 +685,7 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
             "Sources : Open-Meteo (prévisions et qualité de l'air). "
             "Seuils d'alerte : recommandations de l'OMS."
         )
-    return city_info, mock_mode, retro_mode
+    return city_info, mock_mode, retro_mode, period_slot
 
 
 def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
@@ -661,7 +731,7 @@ def render_dashboard():
     """
     st.set_page_config(page_title="Dashboard Météo & AQI", page_icon=":material/partly_cloudy_day:", layout="wide")
 
-    city_info, mock_mode, retro_mode = _render_sidebar()
+    city_info, mock_mode, retro_mode, period_slot = _render_sidebar()
     city_name = city_info["name"]
     theme_name = _get_theme_name(retro_mode)
     palette = THEMES[theme_name]
@@ -684,6 +754,9 @@ def render_dashboard():
     if df.empty:
         st.error("Impossible de récupérer ou d'afficher les données.", icon=":material/error:")
         return
+
+    with period_slot:
+        start_date, end_date = _select_period(df)
 
     # Add calculated metrics
     df["health_score"] = DataProcessor.calculate_custom_health_index(df)
@@ -712,15 +785,25 @@ def render_dashboard():
         ":material/map: Carte Interactive",
     ])
 
+    now = latest["datetime"]
+    period_df = df[(df["datetime"].dt.date >= start_date) & (df["datetime"].dt.date <= end_date)]
+    chart_caption = f"Du {start_date:%d/%m} au {end_date:%d/%m}, pas horaire. La zone grisée correspond aux prévisions."
+
     with tab1:
-        st.subheader("Température et humidité")
-        st.caption("Série horaire sur la période couverte par les API (historique récent et prévisions).")
-        st.plotly_chart(_weather_figure(df, palette, retro_mode), width="stretch", theme=None if retro_mode else "streamlit")
+        st.subheader("Évolution météo")
+        st.caption(chart_caption)
+        _render_metric_chart(
+            period_df, WEATHER_METRICS, ["temperature_2m", "apparent_temperature", "relativehumidity_2m"],
+            "weather_metrics", now, palette, retro_mode,
+        )
 
     with tab2:
-        st.subheader("Concentration des polluants clés")
-        st.caption("PM2.5, PM10 et dioxyde d'azote, en µg/m³.")
-        st.plotly_chart(_pollutants_figure(df, palette, retro_mode), width="stretch", theme=None if retro_mode else "streamlit")
+        st.subheader("Qualité de l'air")
+        st.caption(chart_caption)
+        _render_metric_chart(
+            period_df, AIR_METRICS, ["pm2_5", "pm10", "nitrogen_dioxide"],
+            "air_metrics", now, palette, retro_mode,
+        )
 
     with tab_stats:
         _render_statistics(df, reference_time)
