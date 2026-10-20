@@ -1,3 +1,4 @@
+import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -58,6 +59,31 @@ AQI_CATEGORIES = [
     (float("inf"), "Air dangereux"),
 ]
 
+# Metric catalog shared by the statistics and the charts: column -> (label, unit, decimals)
+METRICS = {
+    "temperature_2m": ("Température", "°C", 1),
+    "apparent_temperature": ("Ressentie", "°C", 1),
+    "relativehumidity_2m": ("Humidité", "%", 0),
+    "precipitation": ("Précipitations", "mm/h", 1),
+    "windspeed_10m": ("Vent", "km/h", 0),
+    "surface_pressure": ("Pression", "hPa", 0),
+    "cloud_cover": ("Couverture nuageuse", "%", 0),
+    "health_score": ("Score confort", "/100", 0),
+    "us_aqi": ("Indice AQI (US)", "", 0),
+    "pm2_5": ("PM2.5", "µg/m³", 1),
+    "pm10": ("PM10", "µg/m³", 1),
+    "nitrogen_dioxide": ("NO₂", "µg/m³", 1),
+    "ozone": ("O₃", "µg/m³", 1),
+    "sulphur_dioxide": ("SO₂", "µg/m³", 1),
+    "carbon_monoxide": ("CO", "µg/m³", 0),
+}
+WEATHER_METRICS = [
+    "temperature_2m", "apparent_temperature", "relativehumidity_2m", "precipitation",
+    "windspeed_10m", "surface_pressure", "cloud_cover", "health_score",
+]
+AIR_METRICS = ["us_aqi", "pm2_5", "pm10", "nitrogen_dioxide", "ozone", "sulphur_dioxide", "carbon_monoxide"]
+STATS_WINDOWS = {"24 h": 24, "3 jours": 72, "7 jours": 168}
+
 FRENCH_DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 FRENCH_MONTHS = [
     "janvier", "février", "mars", "avril", "mai", "juin",
@@ -102,6 +128,13 @@ def _build_css(p: Dict[str, Any]) -> str:
 .pollutant-dot {{ width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--dot); }}
 .pollutant-label {{ color: {p["muted"]}; }}
 .pollutants-caption {{ font-size: 0.8rem; color: {p["muted"]}; }}
+.hero-trend {{ font-size: 0.85rem; color: {p["muted"]}; }}
+.stats-table-wrap {{ overflow-x: auto; margin-bottom: 1.5rem; }}
+.stats-table {{ width: 100%; border-collapse: collapse; font-size: 0.95rem; font-variant-numeric: tabular-nums; }}
+.stats-table th {{ font-weight: 400; font-size: 0.8rem; color: {p["muted"]}; text-align: right; padding: 0.4rem 0.6rem; border-bottom: 1px solid {p["line"]}; white-space: nowrap; }}
+.stats-table td {{ color: {p["text"]}; text-align: right; padding: 0.45rem 0.6rem; border-bottom: 1px solid {p["line"]}; white-space: nowrap; }}
+.stats-table th:first-child, .stats-table td:first-child {{ text-align: left; padding-left: 0; }}
+.stats-table td.stats-trend {{ color: {p["muted"]}; }}
 .meteo-alert {{ border-left: 3px solid; border-radius: 0; padding: 0.65rem 1rem; margin-bottom: 0.6rem; }}
 .meteo-alert p {{ margin: 0; }}
 .meteo-alert--danger {{ border-color: {p["danger"]}; background: {p["danger_bg"]}; color: {p["danger_fg"]}; }}
@@ -172,6 +205,9 @@ def _build_retro_css(p: Dict[str, Any]) -> str:
 .stats {{ column-gap: 0.75rem; }}
 .pollutants {{ border-top: none; }}
 .pollutant-dot {{ border-radius: 0; box-shadow: 0 0 6px var(--dot); }}
+.hero-trend, .stats-table {{ font-family: {TERMINAL}; font-size: 1.15rem; }}
+.stats-table th {{ font-family: {TERMINAL}; font-size: 1.05rem; color: {cyan}; border-bottom: 2px solid rgba(255, 43, 214, 0.5); }}
+.stats-table td {{ border-bottom: 1px solid rgba(0, 240, 255, 0.18); }}
 .meteo-alert {{ border: 2px solid; box-shadow: 0 0 12px currentColor; }}
 .meteo-alert p {{ font-size: 1.25rem; color: inherit !important; }}
 .meteo-alert strong {{ font-family: {PIXEL}; font-size: 0.65rem; font-weight: 400; }}
@@ -262,8 +298,8 @@ def _pollutants_html(means: Dict[str, float], p: Dict[str, Any]) -> str:
 
 
 def _render_hero(
-    city: str, latest: pd.Series, today: Optional[pd.Series], means: Dict[str, float], badge: str,
-    p: Dict[str, Any],
+    city: str, latest: pd.Series, today: Optional[pd.Series], means: Dict[str, float],
+    temp_change: float, badge: str, p: Dict[str, Any],
 ) -> None:
     """Featured block: city, temperatures, AQI gauge, weather tiles and pollutant strip."""
     aqi = latest["us_aqi"]
@@ -284,6 +320,10 @@ def _render_hero(
     if today is not None:
         temp_details.append(f"min {today['temperature_2m_min']:.0f}° / max {today['temperature_2m_max']:.0f}°")
     precipitation = today["precipitation_sum"] if today is not None else latest["precipitation"]
+    trend_html = (
+        f'<div class="hero-trend">{_format_signed(temp_change, 1)}° par rapport à hier à la même heure</div>'
+        if not pd.isna(temp_change) else ""
+    )
     wind_direction = latest["wind_direction_10m"]
     # Meteorological convention: the direction the wind comes from; the arrow shows where it blows
     wind_arrow_angle = (wind_direction + 180) % 360
@@ -297,6 +337,7 @@ def _render_hero(
           <span class="hero-temp">{latest["temperature_2m"]:.0f}°</span>
           <span class="hero-sub">{" · ".join(temp_details)}</span>
         </div>
+        {trend_html}
       </div>
       {aqi_block}
     </div>
@@ -430,6 +471,58 @@ def _pollutants_figure(df: pd.DataFrame, p: Dict[str, Any], retro: bool) -> go.F
     fig.update_layout(margin_r=16)
     fig.update_yaxes(title_text="Concentration (µg/m³)", rangemode="tozero")
     return fig
+
+
+def _format_signed(value: float, decimals: int) -> str:
+    """Signed number with an arrow, e.g. '↑ +1.8'."""
+    if pd.isna(value):
+        return "–"
+    value = round(value, decimals)
+    if value == 0:
+        return f"→ {0:.{decimals}f}"
+    arrow = "↑" if value > 0 else "↓"
+    return f"{arrow} {value:+.{decimals}f}"
+
+
+def _stats_table_html(stats: pd.DataFrame, columns: List[str]) -> str:
+    """HTML table of statistics and trends (custom HTML so it follows every theme)."""
+    header = (
+        "<tr><th>Métrique</th><th>Moyenne</th><th>Médiane</th><th>Min</th><th>Max</th>"
+        "<th>Évolution sur 24 h</th><th>Tendance sur 7 j (par jour)</th></tr>"
+    )
+    rows = []
+    for column in columns:
+        if column not in stats.index:
+            continue
+        label, unit, decimals = METRICS[column]
+        row = stats.loc[column]
+        name = f"{label} ({unit})" if unit and unit != "/100" else label
+        cells = "".join(f"<td>{row[key]:.{decimals}f}</td>" for key in ("mean", "median", "min", "max"))
+        rows.append(
+            f"<tr><td>{name}</td>{cells}"
+            f'<td class="stats-trend">{_format_signed(row["change_24h"], decimals)}</td>'
+            f'<td class="stats-trend">{_format_signed(row["slope_7d"], decimals + 1)}</td></tr>'
+        )
+    return f'<div class="stats-table-wrap"><table class="stats-table">{header}{"".join(rows)}</table></div>'
+
+
+def _render_statistics(df: pd.DataFrame, reference_time: Optional[datetime.datetime]) -> None:
+    """Statistics tab: window selector and two tables (weather, air quality)."""
+    window_label = st.segmented_control(
+        "Fenêtre de calcul", list(STATS_WINDOWS), default="24 h",
+        help="Moyenne, médiane, min et max sont calculés sur les dernières heures observées, sans les prévisions.",
+    ) or "24 h"
+    stats = DataProcessor.compute_statistics(
+        df, WEATHER_METRICS + AIR_METRICS, STATS_WINDOWS[window_label], reference_time
+    )
+    st.subheader("Météo")
+    st.html(_stats_table_html(stats, WEATHER_METRICS))
+    st.subheader("Qualité de l'air")
+    st.html(_stats_table_html(stats, AIR_METRICS))
+    st.caption(
+        "Évolution sur 24 h : valeur actuelle moins celle d'il y a 24 h. "
+        "Tendance sur 7 j : pente d'une régression linéaire sur les 7 derniers jours."
+    )
 
 
 def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
@@ -606,13 +699,16 @@ def render_dashboard():
         badge = '<span class="hero-badge hero-badge--warning">Données simulées : API indisponible</span>'
     else:
         badge = ""
-    _render_hero(city_name, latest, today, current_means(df, reference_time), badge, palette)
+    temp_change = DataProcessor.compute_statistics(df, ["temperature_2m"], 24, reference_time).loc[
+        "temperature_2m", "change_24h"]
+    _render_hero(city_name, latest, today, current_means(df, reference_time), temp_change, badge, palette)
     _render_alerts(detect_alerts(df, reference_time))
 
     # Visualizations
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab_stats, tab3 = st.tabs([
         ":material/thermostat: Évolution Météo",
         ":material/air: Qualité de l'Air",
+        ":material/query_stats: Statistiques",
         ":material/map: Carte Interactive",
     ])
 
@@ -625,6 +721,9 @@ def render_dashboard():
         st.subheader("Concentration des polluants clés")
         st.caption("PM2.5, PM10 et dioxyde d'azote, en µg/m³.")
         st.plotly_chart(_pollutants_figure(df, palette, retro_mode), width="stretch", theme=None if retro_mode else "streamlit")
+
+    with tab_stats:
+        _render_statistics(df, reference_time)
 
     with tab3:
         st.subheader("Localisation de la station de suivi")

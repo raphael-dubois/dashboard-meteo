@@ -78,6 +78,20 @@ class TestDashboardModules(unittest.TestCase):
         self.assertAlmostEqual(current_means(df)["o3"], 50.0)
         self.assertEqual(detect_alerts(df), [])
 
+    def test_statistics_and_trends_ignore_forecasts(self):
+        # 8 days of observations rising by exactly 1 °C per day, then 24 h of absurd "forecasts"
+        times = pd.date_range("2026-01-01 00:00", periods=8 * 24 + 24, freq="h")
+        temperature = [hour / 24 for hour in range(8 * 24)] + [100.0] * 24
+        df = pd.DataFrame({"datetime": times, "temperature_2m": temperature})
+        now = times[8 * 24 - 1]
+
+        stats = DataProcessor.compute_statistics(df, ["temperature_2m"], 24, now).loc["temperature_2m"]
+        self.assertAlmostEqual(stats["change_24h"], 1.0)
+        self.assertAlmostEqual(stats["slope_7d"], 1.0, places=6)
+        self.assertAlmostEqual(stats["max"], (8 * 24 - 1) / 24)
+        # Mean of the last 24 hourly values of a linear series = value at mid-window
+        self.assertAlmostEqual(stats["mean"], (8 * 24 - 1 - 11.5) / 24)
+
     def test_heatwave_danger_above_38(self):
         alerts = detect_alerts(self._hourly_df(temperature_2m=[20.0] * 23 + [39.0]))
         self.assertEqual(alerts, [{"level": "danger", "message": "Alerte canicule : 39.0 °C (seuil 38 °C)"}])
