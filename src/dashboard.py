@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-from .alerts import THRESHOLDS, detect_alerts
+from .alerts import POLLUTANT_KEYS, THRESHOLDS, current_means, detect_alerts
 from .api_client import WeatherAPIClient, DEFAULT_CITIES, CACHE_TTL_MINUTES
 from .data_processing import DataProcessor
 
@@ -56,16 +56,6 @@ AQI_CATEGORIES = [
     (200, "Air de mauvaise qualité"),
     (300, "Air de très mauvaise qualité"),
     (float("inf"), "Air dangereux"),
-]
-
-# Pollutants shown under the weather tiles: (DataFrame column, label, THRESHOLDS key)
-POLLUTANTS = [
-    ("pm2_5", "PM2.5", "pm2_5"),
-    ("pm10", "PM10", "pm10"),
-    ("nitrogen_dioxide", "NO₂", "no2"),
-    ("ozone", "O₃", "o3"),
-    ("sulphur_dioxide", "SO₂", "so2"),
-    ("carbon_monoxide", "CO", "co"),
 ]
 
 FRENCH_DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -256,23 +246,24 @@ def _aqi_gauge_html(aqi: float, color: str, p: Dict[str, Any]) -> str:
     )
 
 
-def _pollutants_html(latest: pd.Series, p: Dict[str, Any]) -> str:
-    """Strip with the six monitored pollutants, colored against WHO thresholds when defined."""
+def _pollutants_html(means: Dict[str, float], p: Dict[str, Any]) -> str:
+    """Strip with the six monitored pollutants (WHO-period averages), colored against their thresholds."""
     items = []
-    for column, label, threshold_key in POLLUTANTS:
-        value = latest.get(column)
+    for key in POLLUTANT_KEYS:
+        value = means.get(key)
         if value is None or pd.isna(value):
             continue
-        level = _threshold_level(value, threshold_key) if threshold_key in THRESHOLDS else "ok"
         items.append(
-            f'<span class="pollutant"><span class="pollutant-dot" style="--dot: {_level_color(level, p)}"></span>'
-            f'<span class="pollutant-label">{label}</span> {value:.1f}</span>'
+            f'<span class="pollutant"><span class="pollutant-dot" style="--dot: {_level_color(_threshold_level(value, key), p)}"></span>'
+            f'<span class="pollutant-label">{THRESHOLDS[key]["label"]}</span> {value:.1f}</span>'
         )
-    return f'<div class="pollutants">{"".join(items)}<span class="pollutants-caption">µg/m³</span></div>'
+    caption = "µg/m³ · moyennes sur 24 h (O₃ sur 8 h), seuils OMS"
+    return f'<div class="pollutants">{"".join(items)}<span class="pollutants-caption">{caption}</span></div>'
 
 
 def _render_hero(
-    city: str, latest: pd.Series, today: Optional[pd.Series], badge: str, p: Dict[str, Any]
+    city: str, latest: pd.Series, today: Optional[pd.Series], means: Dict[str, float], badge: str,
+    p: Dict[str, Any],
 ) -> None:
     """Featured block: city, temperatures, AQI gauge, weather tiles and pollutant strip."""
     aqi = latest["us_aqi"]
@@ -335,7 +326,7 @@ def _render_hero(
         <div class="stat-value">{latest["health_score"]:.0f}<span class="stat-unit">/100</span></div>
       </div>
     </div>
-    {_pollutants_html(latest, p)}
+    {_pollutants_html(means, p)}
     """)
 
 
@@ -615,7 +606,7 @@ def render_dashboard():
         badge = '<span class="hero-badge hero-badge--warning">Données simulées : API indisponible</span>'
     else:
         badge = ""
-    _render_hero(city_name, latest, today, badge, palette)
+    _render_hero(city_name, latest, today, current_means(df, reference_time), badge, palette)
     _render_alerts(detect_alerts(df, reference_time))
 
     # Visualizations

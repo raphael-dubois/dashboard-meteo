@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from src.alerts import detect_alerts
+from src.alerts import current_means, detect_alerts
 from src.api_client import DEFAULT_CITIES, WeatherAPIClient
 from src.dashboard import _all_cities_csv
 from src.data_processing import DataProcessor
@@ -54,6 +54,33 @@ class TestDashboardModules(unittest.TestCase):
 
     def test_no_alerts_on_empty_df(self):
         self.assertEqual(detect_alerts(pd.DataFrame()), [])
+
+    @staticmethod
+    def _hourly_df(hours: int = 24, **columns) -> pd.DataFrame:
+        """Hourly DataFrame ending on 2026-01-02 00:00 with constant defaults."""
+        times = pd.date_range(end="2026-01-02 00:00", periods=hours, freq="h")
+        data = {"datetime": times, "temperature_2m": 20.0, "pm2_5": 5.0, "nitrogen_dioxide": 10.0}
+        data.update(columns)
+        return pd.DataFrame(data)
+
+    def test_isolated_spike_does_not_trigger_24h_alert(self):
+        df = self._hourly_df(pm2_5=[5.0] * 23 + [100.0])
+        # 24 h mean = (23 * 5 + 100) / 24 ≈ 9 µg/m³, below the WHO guideline of 15
+        self.assertEqual(detect_alerts(df), [])
+
+    def test_sustained_pollution_triggers_danger(self):
+        alerts = detect_alerts(self._hourly_df(pm2_5=30.0))
+        self.assertEqual(alerts[0]["level"], "danger")
+        self.assertIn("PM2.5", alerts[0]["message"])
+
+    def test_ozone_uses_8h_window(self):
+        df = self._hourly_df(ozone=[150.0] * 16 + [50.0] * 8)
+        self.assertAlmostEqual(current_means(df)["o3"], 50.0)
+        self.assertEqual(detect_alerts(df), [])
+
+    def test_heatwave_danger_above_38(self):
+        alerts = detect_alerts(self._hourly_df(temperature_2m=[20.0] * 23 + [39.0]))
+        self.assertEqual(alerts, [{"level": "danger", "message": "Alerte canicule : 39.0 °C (seuil 38 °C)"}])
 
     def test_current_index_skips_forecasts(self):
         df = self.mock_df.assign(datetime=pd.to_datetime(self.mock_df["time"]))

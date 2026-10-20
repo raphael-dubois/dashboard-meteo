@@ -80,3 +80,15 @@ class DataProcessor:
         if not not_future.any():
             return 0
         return int(np.flatnonzero(not_future)[-1])
+
+    @staticmethod
+    def rolling_mean(
+        df: pd.DataFrame, column: str, hours: int, reference_time: Optional[datetime.datetime] = None
+    ) -> float:
+        """
+        Mean of a column over the `hours` hours ending at the current row (WHO averaging periods).
+        Forecast rows after the current one are excluded.
+        """
+        end = df["datetime"].iloc[DataProcessor.get_current_index(df, reference_time)]
+        window = df[(df["datetime"] > end - pd.Timedelta(hours=hours)) & (df["datetime"] <= end)]
+        return float(window[column].mean())
