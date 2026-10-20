@@ -1,6 +1,9 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
+
+import requests
 
 from src.api_client import WeatherAPIClient
 
@@ -30,6 +33,20 @@ class TestWeatherAPIClient(unittest.TestCase):
         daily = data["weather"]["daily"]
         self.assertEqual(len(daily["time"]), len(daily["temperature_2m_max"]))
         self.assertTrue(all(lo <= hi for lo, hi in zip(daily["temperature_2m_min"], daily["temperature_2m_max"])))
+
+    def test_batch_aqi_maps_results_to_cities_in_order(self):
+        cities = {"Paris": {"lat": 48.85, "lon": 2.35}, "Lyon": {"lat": 45.76, "lon": 4.83}}
+        response = mock.Mock()
+        response.json.return_value = [{"current": {"us_aqi": 42}}, {"current": {"us_aqi": 87}}]
+        with mock.patch("src.api_client.requests.get", return_value=response) as get:
+            result = self.client.fetch_current_aqi(cities)
+        self.assertEqual(result, {"Paris": 42, "Lyon": 87})
+        self.assertEqual(get.call_args.kwargs["params"]["latitude"], "48.85,45.76")
+
+    def test_batch_aqi_returns_none_when_network_fails(self):
+        cities = {"Paris": {"lat": 48.85, "lon": 2.35}}
+        with mock.patch("src.api_client.requests.get", side_effect=requests.exceptions.ConnectionError):
+            self.assertEqual(self.client.fetch_current_aqi(cities), {"Paris": None})
 
     def test_cache_roundtrip(self):
         payload = {"hello": "world"}

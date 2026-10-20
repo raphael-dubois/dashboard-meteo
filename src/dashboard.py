@@ -2,7 +2,6 @@ import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
@@ -50,6 +49,9 @@ THEMES: Dict[str, Dict[str, Any]] = {
         "map_style": "carto-darkmatter",
     },
 }
+
+# Short AQI category names for the map legend, same order as AQI_CATEGORIES
+AQI_SHORT_LABELS = ["Bon", "Modéré", "Mauvais (sensibles)", "Mauvais", "Très mauvais", "Dangereux"]
 
 # US AQI categories: (upper bound, label); colors come from the active palette
 AQI_CATEGORIES = [
@@ -244,12 +246,18 @@ def _format_coordinates(lat: float, lon: float) -> str:
     return f"{abs(lat):.2f}° {lat_ref} · {abs(lon):.2f}° {lon_ref}"
 
 
+def _aqi_index(aqi: float) -> int:
+    """Index of the US AQI category in AQI_CATEGORIES."""
+    for index, (upper_bound, _) in enumerate(AQI_CATEGORIES):
+        if aqi <= upper_bound:
+            return index
+    return len(AQI_CATEGORIES) - 1
+
+
 def _aqi_category(aqi: float, p: Dict[str, Any]) -> Tuple[str, str]:
     """Returns the (label, color) pair of the US AQI category."""
-    for (upper_bound, label), color in zip(AQI_CATEGORIES, p["aqi"]):
-        if aqi <= upper_bound:
-            return label, color
-    return AQI_CATEGORIES[-1][1], p["aqi"][-1]
+    index = _aqi_index(aqi)
+    return AQI_CATEGORIES[index][1], p["aqi"][index]
 
 
 def _threshold_level(value: float, key: str) -> str:
@@ -519,6 +527,81 @@ def _render_metric_chart(
     st.plotly_chart(
         _metrics_figure(df, ordered, now, p, retro),
         width="stretch", theme=None if retro else "streamlit",
+    )
+
+
+def _aqi_map_figure(map_df: pd.DataFrame, center: Dict[str, float], p: Dict[str, Any], retro: bool) -> go.Figure:
+    """
+    One layer per AQI category (ordered legend), the selected city ringed by a larger marker.
+    Plotly maps do not follow the light/dark switch: the basemap depends on the retro mode only.
+    """
+    fig = go.Figure()
+    ring_color = "#E9F1FF" if retro else "#2B2620"
+    selected = map_df[map_df["selected"]]
+    fig.add_trace(go.Scattermap(
+        lat=selected["lat"], lon=selected["lon"], mode="markers",
+        marker=dict(size=30, color=ring_color), showlegend=False, hoverinfo="skip",
+    ))
+
+    categories = list(zip(AQI_SHORT_LABELS, p["aqi"])) + [("Indisponible", "#8A8F98")]
+    for label, color in categories:
+        layer = map_df[map_df["category"] == label]
+        if layer.empty:
+            continue
+        if retro:
+            fig.add_trace(go.Scattermap(
+                lat=layer["lat"], lon=layer["lon"], mode="markers",
+                marker=dict(size=34, color=color, opacity=0.3), showlegend=False, hoverinfo="skip",
+            ))
+        fig.add_trace(go.Scattermap(
+            lat=layer["lat"], lon=layer["lon"], mode="markers", name=label,
+            marker=dict(size=20, color=color),
+            hovertext=layer["city"], customdata=layer[["aqi_text"]],
+            hovertemplate="<b>%{hovertext}</b><br>AQI (US) : %{customdata[0]}<extra>" + label + "</extra>",
+        ))
+
+    fig.update_layout(
+        map=dict(style=p["map_style"], center=center, zoom=5),
+        height=600, margin=dict(l=0, r=0, t=0, b=0),
+        legend=dict(
+            orientation="h", x=0.01, y=0.99, xanchor="left", yanchor="top", title_text="AQI (US)",
+            bgcolor="rgba(17, 13, 34, 0.85)" if retro else "rgba(255, 255, 255, 0.85)",
+            font=dict(color=p["text"] if retro else "#2B2620"),
+        ),
+    )
+    return fig
+
+
+def _render_map(
+    city_info: Dict[str, Any], current_aqi: float, client: WeatherAPIClient, mock_mode: bool,
+    p: Dict[str, Any], retro: bool,
+) -> None:
+    """Map tab: reference cities colored by current AQI, centered on the selected city."""
+    others = {name: coords for name, coords in DEFAULT_CITIES.items() if name != city_info["name"]}
+    aqi_by_city = client.fetch_current_aqi(others, mock_mode=mock_mode)
+
+    rows = [
+        {"city": name, "lat": coords["lat"], "lon": coords["lon"], "aqi": aqi_by_city.get(name), "selected": False}
+        for name, coords in others.items()
+    ]
+    # The selected city reuses the AQI of the main block so both values match
+    rows.append({"city": city_info["name"], "lat": city_info["lat"], "lon": city_info["lon"],
+                 "aqi": current_aqi, "selected": True})
+    map_df = pd.DataFrame(rows)
+    map_df["aqi"] = pd.to_numeric(map_df["aqi"], errors="coerce")
+    map_df["category"] = map_df["aqi"].apply(
+        lambda aqi: "Indisponible" if pd.isna(aqi) else AQI_SHORT_LABELS[_aqi_index(aqi)]
+    )
+    map_df["aqi_text"] = map_df["aqi"].apply(lambda aqi: "indisponible" if pd.isna(aqi) else f"{aqi:.0f}")
+
+    st.subheader("Qualité de l'air par ville")
+    st.caption(
+        f"Indice AQI (US) actuel de {city_info['name']} (cerclée) et des villes de référence. "
+        "Dézoomez pour voir les villes hors d'Europe."
+    )
+    st.plotly_chart(
+        _aqi_map_figure(map_df, {"lat": city_info["lat"], "lon": city_info["lon"]}, p, retro),
+        width="stretch", theme=None,
     )
 
 
@@ -809,21 +892,7 @@ def render_dashboard():
         _render_statistics(df, reference_time)
 
     with tab3:
-        st.subheader("Localisation de la station de suivi")
-        map_df = pd.DataFrame([{
-            "lat": city_info["lat"],
-            "lon": city_info["lon"],
-            "city": city_name,
-            "aqi": latest["us_aqi"]
-        }])
-        fig_map = px.scatter_map(
-            map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
-            color_discrete_sequence=[palette["accent"]], zoom=12, height=600,
-            center={"lat": city_info["lat"], "lon": city_info["lon"]},
-            map_style=palette["map_style"]
-        )
-        fig_map.update_traces(marker=dict(size=18))
-        st.plotly_chart(fig_map, width="stretch")
+        _render_map(city_info, latest["us_aqi"], client, mock_mode, palette, retro_mode)
 
     st.divider()
     st.download_button(

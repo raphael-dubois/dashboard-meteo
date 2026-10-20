@@ -39,6 +39,7 @@ class WeatherAPIClient:
     """
 
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+    AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
     def __init__(self, db_path: str = CACHE_DB):
         self.db_path = db_path
@@ -188,6 +189,45 @@ class WeatherAPIClient:
         except requests.exceptions.RequestException as e:
             logging.error(f"API request failed: {e}. Falling back to mock data.")
             return self._generate_mock_data(lat, lon)
+
+    def fetch_current_aqi(
+        self, cities: Dict[str, Dict[str, float]], mock_mode: bool = False
+    ) -> Dict[str, Optional[float]]:
+        """
+        Current US AQI of several cities in a single request: Open-Meteo accepts comma-separated
+        coordinates and answers with one result per location, in the same order.
+        Returns {city name: AQI}, with None when the value is unavailable.
+        """
+        names = list(cities)
+        if mock_mode:
+            return {name: float(np.random.randint(15, 160)) for name in names}
+
+        cache_key = "aqi_" + "_".join(f"{c['lat']},{c['lon']}" for c in cities.values())
+        cached = self._get_cached_data(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            response = requests.get(
+                self.AIR_QUALITY_URL,
+                params={
+                    "latitude": ",".join(str(c["lat"]) for c in cities.values()),
+                    "longitude": ",".join(str(c["lon"]) for c in cities.values()),
+                    "current": "us_aqi",
+                    "timezone": "auto",
+                },
+                timeout=5,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            # A single location comes back as an object, several as a list
+            locations = payload if isinstance(payload, list) else [payload]
+            result = {name: loc.get("current", {}).get("us_aqi") for name, loc in zip(names, locations)}
+            self._set_cached_data(cache_key, result)
+            return result
+        except requests.exceptions.RequestException as e:
+            logging.warning(f"Batch AQI request failed: {e}")
+            return {name: None for name in names}
 
     def _generate_mock_data(self, lat: float, lon: float) -> Dict[str, Any]:
         """
