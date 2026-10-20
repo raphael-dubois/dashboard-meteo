@@ -342,7 +342,8 @@ def render_dashboard():
         }])
         fig_map = px.scatter_map(
             map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
-            color_discrete_sequence=["fuchsia"], zoom=9, height=400,
+            color_discrete_sequence=["fuchsia"], zoom=12, height=400,
+            center={"lat": city_info["lat"], "lon": city_info["lon"]},
             map_style="open-street-map"
         )
         st.plotly_chart(fig_map, width="stretch")
