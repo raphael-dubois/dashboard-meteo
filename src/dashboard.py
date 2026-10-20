@@ -281,7 +281,7 @@ def _render_sidebar() -> Tuple[str, bool]:
     return selected_city, mock_mode
 
 
-def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> Tuple[bytes, List[str]]:
+def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
     """Builds a full-precision CSV containing hourly data for every configured city."""
     city_frames = []
     unavailable_cities = []
@@ -302,12 +302,14 @@ def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> Tuple[bytes, L
         city_frames.append(city_df)
 
     if unavailable_cities:
-        return b"", unavailable_cities
+        raise ValueError(
+            "Données indisponibles pour : " + ", ".join(unavailable_cities)
+        )
 
     csv_text = pd.concat(city_frames, ignore_index=True).to_csv(
         index=False, sep=";", float_format="%.17g"
     )
-    return csv_text.encode("utf-8-sig"), []
+    return csv_text.encode("utf-8-sig")
 
 
 def render_dashboard():
@@ -381,28 +383,11 @@ def render_dashboard():
         st.plotly_chart(fig_map, width="stretch")
 
     st.divider()
-    st.subheader("Exporter les données")
-    st.caption("Télécharge les données horaires complètes de toutes les villes configurées.")
-
-    if st.button("Préparer le CSV de toutes les villes", type="secondary"):
-        with st.spinner("Récupération des données de toutes les villes…"):
-            csv_data, unavailable_cities = _all_cities_csv(client, mock_mode)
-
-        if unavailable_cities:
-            st.session_state.pop("all_cities_csv", None)
-            st.error(
-                "Export annulé : aucune donnée exploitable pour "
-                + ", ".join(unavailable_cities)
-                + "."
-            )
-        else:
-            st.session_state["all_cities_csv"] = csv_data
-
-    if "all_cities_csv" in st.session_state:
-        st.download_button(
-            "Télécharger le CSV de toutes les villes",
-            data=st.session_state["all_cities_csv"],
-            file_name="donnees_toutes_les_villes.csv",
-            mime="text/csv",
-        )
-
+    st.download_button(
+        "Télécharger les données de toutes les villes (CSV)",
+        data=lambda: _all_cities_csv(client, mock_mode),
+        file_name="donnees_toutes_les_villes.csv",
+        mime="text/csv",
+        on_click="ignore",
+        width="stretch",
+    )
