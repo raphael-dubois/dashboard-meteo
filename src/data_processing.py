@@ -1,4 +1,5 @@
-from typing import Dict, Any
+import datetime
+from typing import Dict, Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -44,3 +45,29 @@ class DataProcessor:
 
         score = 100 - (temp_penalty + humidity_penalty + pollution_penalty)
         return score.clip(0, 100).round(1)
+
+    @staticmethod
+    def get_reference_time(raw_data: Dict[str, Any]) -> datetime.datetime:
+        """
+        Current time expressed in the timezone of the API data.
+        Open-Meteo returns naive local times along with their UTC offset.
+        """
+        offset = raw_data.get("weather", {}).get("utc_offset_seconds")
+        if offset is None:
+            # Mock data is generated with the machine's local time
+            return datetime.datetime.now()
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        return now_utc + datetime.timedelta(seconds=offset)
+
+    @staticmethod
+    def get_current_index(df: pd.DataFrame, reference_time: Optional[datetime.datetime] = None) -> int:
+        """
+        Position of the most recent row that is not in the future.
+        The API also returns several days of forecasts, so the last row is not "now".
+        """
+        if reference_time is None:
+            return len(df) - 1
+        not_future = (df["datetime"] <= reference_time).to_numpy()
+        if not not_future.any():
+            return 0
+        return int(np.flatnonzero(not_future)[-1])

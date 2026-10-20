@@ -1,3 +1,4 @@
+import datetime
 import unittest
 
 import pandas as pd
@@ -30,6 +31,19 @@ class TestDashboardModules(unittest.TestCase):
 
     def test_no_alerts_on_empty_df(self):
         self.assertEqual(detect_alerts(pd.DataFrame()), [])
+
+    def test_current_index_skips_forecasts(self):
+        df = self.mock_df.assign(datetime=pd.to_datetime(self.mock_df["time"]))
+        reference_time = datetime.datetime(2026, 1, 1, 0, 30)
+        self.assertEqual(DataProcessor.get_current_index(df, reference_time), 0)
+        # Only the forecast row (40 °C, high pollution) would trigger alerts
+        self.assertEqual(detect_alerts(df, reference_time), [])
+
+    def test_reference_time_uses_api_offset(self):
+        reference_time = DataProcessor.get_reference_time({"weather": {"utc_offset_seconds": 3600}})
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        delta = reference_time - now_utc
+        self.assertAlmostEqual(delta.total_seconds(), 3600, delta=5)
 
 
 if __name__ == "__main__":

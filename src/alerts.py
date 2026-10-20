@@ -1,6 +1,9 @@
-from typing import Dict, List
+import datetime
+from typing import Dict, List, Optional
 
 import pandas as pd
+
+from .data_processing import DataProcessor
 
 # Thresholds for alerts (WHO Guidelines)
 THRESHOLDS = {
@@ -11,13 +14,13 @@ THRESHOLDS = {
 }
 
 
-def detect_alerts(df: pd.DataFrame) -> List[Dict[str, str]]:
-    """Scans current/recent data points for threshold violations."""
+def detect_alerts(df: pd.DataFrame, reference_time: Optional[datetime.datetime] = None) -> List[Dict[str, str]]:
+    """Scans the current data point for threshold violations."""
     alerts = []
     if df.empty:
         return alerts
 
-    latest = df.iloc[-1]
+    latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
     # PM2.5 check
     if latest["pm2_5"] >= THRESHOLDS["pm2_5"]["danger"]:
