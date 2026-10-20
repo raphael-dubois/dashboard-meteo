@@ -1,3 +1,7 @@
+# Hide the developer options (Deploy button, rerun, clear cache); the Settings menu stays
+[client]
+toolbarMode = "viewer"
+
 # Shared settings for both modes. Light/dark follows the system or the Settings menu.
 [theme]
 font = "sans-serif"
