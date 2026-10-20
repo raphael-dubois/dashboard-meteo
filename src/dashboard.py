@@ -375,12 +375,72 @@ def _pollutants_figure(df: pd.DataFrame, p: Dict[str, Any], retro: bool) -> go.F
     return fig
 
 
-def _render_sidebar() -> Tuple[str, bool, bool]:
-    """Sidebar: location, data source and appearance. Returns (city, mock_mode, retro_mode)."""
+def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool]:
+    """Sidebar: location search, data source and appearance. Returns (city_info, mock_mode, retro_mode).
+
+    city_info is a dict with keys: name, lat, lon.
+    """
+    # Initialise session state for the city search
+    if "city_search_results" not in st.session_state:
+        st.session_state.city_search_results = []
+    if "selected_city_info" not in st.session_state:
+        # Default to the first city in DEFAULT_CITIES
+        first_city = next(iter(DEFAULT_CITIES))
+        st.session_state.selected_city_info = {
+            "name": first_city,
+            "lat": DEFAULT_CITIES[first_city]["lat"],
+            "lon": DEFAULT_CITIES[first_city]["lon"],
+        }
+
+    client = WeatherAPIClient()
+
     with st.sidebar:
-        st.subheader(":material/location_on: Lieu")
-        selected_city = st.selectbox("Ville", list(DEFAULT_CITIES.keys()))
-        city_info = DEFAULT_CITIES[selected_city]
+        st.subheader(":material/search: Rechercher une ville")
+        search_query = st.text_input(
+            "Recherche",
+            placeholder="Tapez un nom de ville…",
+            label_visibility="collapsed",
+        )
+
+        if search_query and len(search_query.strip()) >= 2:
+            results = client.search_cities(search_query)
+            st.session_state.city_search_results = results
+        elif not search_query:
+            # When the field is empty, show default cities
+            st.session_state.city_search_results = [
+                {"name": name, "label": name, "lat": info["lat"], "lon": info["lon"],
+                 "country": "", "admin1": "", "population": 0}
+                for name, info in DEFAULT_CITIES.items()
+            ]
+
+        results = st.session_state.city_search_results
+        if results:
+            labels = [r["label"] for r in results]
+            # Try to keep the current selection visible in the list
+            current_name = st.session_state.selected_city_info["name"]
+            default_idx = 0
+            for i, r in enumerate(results):
+                if r["name"] == current_name:
+                    default_idx = i
+                    break
+
+            chosen_label = st.selectbox(
+                "Résultats",
+                labels,
+                index=default_idx,
+                label_visibility="collapsed",
+            )
+            chosen = results[labels.index(chosen_label)]
+            st.session_state.selected_city_info = {
+                "name": chosen["name"],
+                "lat": chosen["lat"],
+                "lon": chosen["lon"],
+            }
+        else:
+            if search_query:
+                st.caption("Aucun résultat trouvé.")
+
+        city_info = st.session_state.selected_city_info
         st.caption(_format_coordinates(city_info["lat"], city_info["lon"]))
 
         st.divider()
@@ -405,11 +465,11 @@ def _render_sidebar() -> Tuple[str, bool, bool]:
             "Sources : Open-Meteo (prévisions et qualité de l'air). "
             "Seuils d'alerte : recommandations de l'OMS."
         )
-    return selected_city, mock_mode, retro_mode
+    return city_info, mock_mode, retro_mode
 
 
 def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
-    """Builds a full-precision CSV containing hourly data for every configured city."""
+    """Builds a CSV containing 2 days of data sampled every 2 hours for every configured city."""
     city_frames = []
     unavailable_cities = []
 
@@ -421,6 +481,11 @@ def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
         if city_df.empty:
             unavailable_cities.append(city)
             continue
+
+        reference_time = DataProcessor.get_reference_time(raw_data)
+        current_idx = DataProcessor.get_current_index(city_df, reference_time)
+        start_idx = max(0, min(current_idx, len(city_df) - 48))
+        city_df = city_df.iloc[start_idx : start_idx + 48 : 2].copy()
 
         city_df["health_score"] = DataProcessor.calculate_custom_health_index(city_df)
         city_df.insert(0, "ville", city)
@@ -446,7 +511,8 @@ def render_dashboard():
     """
     st.set_page_config(page_title="Dashboard Météo & AQI", page_icon=":material/partly_cloudy_day:", layout="wide")
 
-    selected_city, mock_mode, retro_mode = _render_sidebar()
+    city_info, mock_mode, retro_mode = _render_sidebar()
+    city_name = city_info["name"]
     theme_name = _get_theme_name(retro_mode)
     palette = THEMES[theme_name]
     _inject_styles(theme_name)
@@ -459,10 +525,9 @@ def render_dashboard():
     """)
 
     client = WeatherAPIClient()
-    city_info = DEFAULT_CITIES[selected_city]
 
     # Fetch Data
-    with st.spinner(f"Chargement des données pour {selected_city}…"):
+    with st.spinner(f"Chargement des données pour {city_name}…"):
         raw_data = client.fetch_weather_and_air_quality(city_info["lat"], city_info["lon"], mock_mode=mock_mode)
         df = DataProcessor.process_raw_api_data(raw_data)
 
@@ -475,7 +540,7 @@ def render_dashboard():
     reference_time = DataProcessor.get_reference_time(raw_data)
     latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
-    _render_hero(selected_city, latest, mock_mode, palette)
+    _render_hero(city_name, latest, mock_mode, palette)
     _render_alerts(detect_alerts(df, reference_time))
 
     # Visualizations
@@ -500,7 +565,7 @@ def render_dashboard():
         map_df = pd.DataFrame([{
             "lat": city_info["lat"],
             "lon": city_info["lon"],
-            "city": selected_city,
+            "city": city_name,
             "aqi": latest["us_aqi"]
         }])
         fig_map = px.scatter_map(

@@ -36,10 +36,60 @@ class WeatherAPIClient:
     Author: Student A (Data / API Engineer)
     """
 
+    GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+
     def __init__(self, db_path: str = CACHE_DB):
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
+
+    def search_cities(self, query: str, count: int = 8, language: str = "fr") -> list[Dict[str, Any]]:
+        """
+        Searches for cities using the Open-Meteo Geocoding API.
+        Returns a list of dicts with keys: name, label, latitude, longitude, country, admin1, population.
+        Results are cached locally to avoid redundant network calls.
+        """
+        query = query.strip()
+        if len(query) < 2:
+            return []
+
+        cache_key = f"geocoding_{query.lower()}_{language}_{count}"
+        cached = self._get_cached_data(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            response = requests.get(
+                self.GEOCODING_URL,
+                params={"name": query, "count": count, "language": language, "format": "json"},
+                timeout=4,
+            )
+            response.raise_for_status()
+            results = response.json().get("results", [])
+
+            cities = []
+            for r in results:
+                parts = [r.get("name", "")]
+                if r.get("admin1"):
+                    parts.append(r["admin1"])
+                if r.get("country"):
+                    parts.append(r["country"])
+                cities.append({
+                    "name": r.get("name", ""),
+                    "label": ", ".join(parts),
+                    "lat": r.get("latitude", 0.0),
+                    "lon": r.get("longitude", 0.0),
+                    "country": r.get("country", ""),
+                    "admin1": r.get("admin1", ""),
+                    "population": r.get("population", 0),
+                })
+
+            self._set_cached_data(cache_key, cities)
+            return cities
+
+        except requests.exceptions.RequestException as e:
+            logging.warning(f"Geocoding request failed: {e}")
+            return []
 
     def _init_db(self) -> None:
         """Initializes SQLite cache database table."""

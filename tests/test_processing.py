@@ -1,9 +1,14 @@
 import datetime
+import io
+import os
+import tempfile
 import unittest
 
 import pandas as pd
 
 from src.alerts import detect_alerts
+from src.api_client import DEFAULT_CITIES, WeatherAPIClient
+from src.dashboard import _all_cities_csv
 from src.data_processing import DataProcessor
 
 
@@ -44,6 +49,17 @@ class TestDashboardModules(unittest.TestCase):
         now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         delta = reference_time - now_utc
         self.assertAlmostEqual(delta.total_seconds(), 3600, delta=5)
+
+    def test_all_cities_csv_2_days_every_2_hours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = WeatherAPIClient(db_path=os.path.join(tmp, "test_cache.db"))
+            csv_bytes = _all_cities_csv(client, mock_mode=True)
+            exported_df = pd.read_csv(io.BytesIO(csv_bytes), sep=";")
+            # 2 days (48h) sampled every 2h = 24 rows per city
+            self.assertEqual(len(exported_df), len(DEFAULT_CITIES) * 24)
+            paris_times = pd.to_datetime(exported_df.loc[exported_df["ville"] == "Paris", "datetime"])
+            diffs = paris_times.diff().dropna()
+            self.assertTrue((diffs == pd.Timedelta(hours=2)).all())
 
 
 if __name__ == "__main__":
