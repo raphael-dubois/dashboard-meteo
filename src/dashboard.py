@@ -313,6 +313,20 @@ def _pollutants_html(means: Dict[str, float], p: Dict[str, Any]) -> str:
     return f'<div class="pollutants">{"".join(items)}<span class="pollutants-caption">{caption}</span></div>'
 
 
+def _data_source_badge(raw_data: Dict[str, Any], city_name: str, mock_mode: bool) -> str:
+    """Badge explaining offline data: why, which reference city, and the recording date."""
+    if raw_data.get("source") != "mock":
+        return ""
+    details = ["Données simulées (mode déconnecté)" if mock_mode else "Données simulées : API indisponible"]
+    if raw_data.get("mock_city") and raw_data["mock_city"] != city_name:
+        details.append(f"relevé de {raw_data['mock_city']}, ville de référence la plus proche")
+    if raw_data.get("mock_captured_at"):
+        captured = datetime.datetime.fromisoformat(raw_data["mock_captured_at"])
+        details.append(f"instantané du {captured:%d/%m/%Y}")
+    css_class = "hero-badge" if mock_mode else "hero-badge hero-badge--warning"
+    return f'<span class="{css_class}">{" · ".join(details)}</span>'
+
+
 def _render_hero(
     city: str, latest: pd.Series, today: Optional[pd.Series], means: Dict[str, float],
     temp_change: float, badge: str, p: Dict[str, Any],
@@ -710,16 +724,27 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool, Any]:
             label_visibility="collapsed",
         )
 
-        if search_query and len(search_query.strip()) >= 2:
+        # The toggle is drawn further down; its value from the previous run is in session_state
+        offline = st.session_state.get("mock_mode", False)
+        if search_query and len(search_query.strip()) >= 2 and not offline:
             results = client.search_cities(search_query)
             st.session_state.city_search_results = results
-        elif not search_query:
-            # When the field is empty, show default cities
+        elif not search_query or offline:
+            # When the field is empty (or offline), show default cities
             st.session_state.city_search_results = [
                 {"name": name, "label": name, "lat": info["lat"], "lon": info["lon"],
                  "country": "", "admin1": "", "population": 0}
                 for name, info in DEFAULT_CITIES.items()
             ]
+            current = st.session_state.selected_city_info
+            if offline and current["name"] not in DEFAULT_CITIES:
+                # Keep a previously searched city: offline it uses the nearest reference city
+                st.session_state.city_search_results.insert(0, {
+                    "name": current["name"], "label": current["name"], "lat": current["lat"],
+                    "lon": current["lon"], "country": "", "admin1": "", "population": 0,
+                })
+            if offline and search_query:
+                st.caption("Recherche en ligne indisponible en mode déconnecté : villes de référence uniquement.")
 
         results = st.session_state.city_search_results
         if results:
@@ -757,7 +782,11 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool, Any]:
         mock_mode = st.toggle(
             "Mode déconnecté",
             value=False,
-            help="Utilise des données simulées au lieu des API Open-Meteo.",
+            key="mock_mode",
+            help=(
+                "Utilise un instantané de vraies réponses Open-Meteo enregistré en JSON "
+                "(data/mock_responses.json), recalé sur la date du jour."
+            ),
         )
         st.caption(f"Cache local des réponses API : {CACHE_TTL_MINUTES} min")
 
@@ -855,12 +884,7 @@ def render_dashboard():
     daily = DataProcessor.process_daily_data(raw_data)
     today_date = latest["datetime"].date()
     today = daily.loc[today_date] if today_date in daily.index else None
-    if mock_mode:
-        badge = '<span class="hero-badge">Données simulées</span>'
-    elif raw_data.get("source") == "mock":
-        badge = '<span class="hero-badge hero-badge--warning">Données simulées : API indisponible</span>'
-    else:
-        badge = ""
+    badge = _data_source_badge(raw_data, city_name, mock_mode)
     temp_change = DataProcessor.compute_statistics(df, ["temperature_2m"], 24, reference_time).loc[
         "temperature_2m", "change_24h"]
     _render_hero(city_name, latest, today, current_means(df, reference_time), temp_change, badge, palette)
