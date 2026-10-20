@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Environnement virtuel
+.venv/
+
+# Cache local des réponses API (recréé automatiquement)
+*.db
+
+# Fichiers système et outils locaux
+.DS_Store
+.claude/
