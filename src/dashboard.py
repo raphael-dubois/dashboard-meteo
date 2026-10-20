@@ -281,6 +281,35 @@ def _render_sidebar() -> Tuple[str, bool]:
     return selected_city, mock_mode
 
 
+def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> Tuple[bytes, List[str]]:
+    """Builds a full-precision CSV containing hourly data for every configured city."""
+    city_frames = []
+    unavailable_cities = []
+
+    for city, coordinates in DEFAULT_CITIES.items():
+        raw_data = client.fetch_weather_and_air_quality(
+            coordinates["lat"], coordinates["lon"], mock_mode=mock_mode
+        )
+        city_df = DataProcessor.process_raw_api_data(raw_data)
+        if city_df.empty:
+            unavailable_cities.append(city)
+            continue
+
+        city_df["health_score"] = DataProcessor.calculate_custom_health_index(city_df)
+        city_df.insert(0, "ville", city)
+        city_df.insert(1, "latitude", coordinates["lat"])
+        city_df.insert(2, "longitude", coordinates["lon"])
+        city_frames.append(city_df)
+
+    if unavailable_cities:
+        return b"", unavailable_cities
+
+    csv_text = pd.concat(city_frames, ignore_index=True).to_csv(
+        index=False, sep=";", float_format="%.17g"
+    )
+    return csv_text.encode("utf-8-sig"), []
+
+
 def render_dashboard():
     """
     Renders Streamlit Web Application Interface.
@@ -350,3 +379,30 @@ def render_dashboard():
         )
         fig_map.update_traces(marker=dict(size=18))
         st.plotly_chart(fig_map, width="stretch")
+
+    st.divider()
+    st.subheader("Exporter les données")
+    st.caption("Télécharge les données horaires complètes de toutes les villes configurées.")
+
+    if st.button("Préparer le CSV de toutes les villes", type="secondary"):
+        with st.spinner("Récupération des données de toutes les villes…"):
+            csv_data, unavailable_cities = _all_cities_csv(client, mock_mode)
+
+        if unavailable_cities:
+            st.session_state.pop("all_cities_csv", None)
+            st.error(
+                "Export annulé : aucune donnée exploitable pour "
+                + ", ".join(unavailable_cities)
+                + "."
+            )
+        else:
+            st.session_state["all_cities_csv"] = csv_data
+
+    if "all_cities_csv" in st.session_state:
+        st.download_button(
+            "Télécharger le CSV de toutes les villes",
+            data=st.session_state["all_cities_csv"],
+            file_name="donnees_toutes_les_villes.csv",
+            mime="text/csv",
+        )
+
