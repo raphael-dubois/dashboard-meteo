@@ -409,7 +409,7 @@ def _render_sidebar() -> Tuple[str, bool, bool]:
 
 
 def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
-    """Builds a full-precision CSV containing hourly data for every configured city."""
+    """Builds a CSV containing 2 days of data sampled every 2 hours for every configured city."""
     city_frames = []
     unavailable_cities = []
 
@@ -421,6 +421,11 @@ def _all_cities_csv(client: WeatherAPIClient, mock_mode: bool) -> bytes:
         if city_df.empty:
             unavailable_cities.append(city)
             continue
+
+        reference_time = DataProcessor.get_reference_time(raw_data)
+        current_idx = DataProcessor.get_current_index(city_df, reference_time)
+        start_idx = max(0, min(current_idx, len(city_df) - 48))
+        city_df = city_df.iloc[start_idx : start_idx + 48 : 2].copy()
 
         city_df["health_score"] = DataProcessor.calculate_custom_health_index(city_df)
         city_df.insert(0, "ville", city)
