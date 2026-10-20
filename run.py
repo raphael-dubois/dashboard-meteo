@@ -292,12 +292,13 @@ def render_dashboard():
         st.success("✅ Qualité de l'air et conditions météorologiques stables. Aucune alerte active.")
 
     # KPI Summary Cards
+    aqi = latest["us_aqi"]
     st.markdown("---")
     col1, col2, col3, col4, col5 = st.columns(5)
     
     col1.metric("Température", f"{latest['temperature_2m']:.1f} °C")
     col2.metric("Humidité", f"{latest['relativehumidity_2m']:.0f} %")
-    col3.metric("Indice AQI (US)", f"{int(latest['us_aqi'])}")
+    col3.metric("Indice AQI (US)", "N/D" if pd.isna(aqi) else str(int(aqi)))
     col4.metric("PM 2.5", f"{latest['pm2_5']:.1f} µg/m³")
     col5.metric("Score Confort (0-100)", f"{latest['health_score']:.1f}")
 
@@ -312,7 +313,7 @@ def render_dashboard():
             labels={"value": "Valeur", "datetime": "Date/Heure", "variable": "Métrique"},
             title="Série temporelle Météo"
         )
-        st.plotly_chart(fig_temp, use_container_width=True)
+        st.plotly_chart(fig_temp, width="stretch")
 
     with tab2:
         st.subheader("Concentration des Polluants Clés (µg/m³)")
@@ -321,7 +322,7 @@ def render_dashboard():
             barmode="group",
             title="Exposition aux polluants sur les 24 dernières heures"
         )
-        st.plotly_chart(fig_air, use_container_width=True)
+        st.plotly_chart(fig_air, width="stretch")
 
     with tab3:
         st.subheader("Localisation de la station de suivi")
@@ -331,12 +332,12 @@ def render_dashboard():
             "city": selected_city,
             "aqi": latest["us_aqi"]
         }])
-        fig_map = px.scatter_mapbox(
+        fig_map = px.scatter_map(
             map_df, lat="lat", lon="lon", hover_name="city", hover_data=["aqi"],
-            color_discrete_sequence=["fuchsia"], zoom=9, height=400
+            color_discrete_sequence=["fuchsia"], zoom=9, height=400,
+            map_style="open-street-map"
         )
-        fig_map.update_layout(mapbox_style="open-street-map")
-        st.plotly_chart(fig_map, use_container_width=True)
+        st.plotly_chart(fig_map, width="stretch")
 
 
 class TestDashboardModules(unittest.TestCase):
