@@ -182,10 +182,12 @@ class WeatherAPIClient:
         weather_url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
             f"&current_weather=true&hourly=temperature_2m,relativehumidity_2m,surface_pressure,windspeed_10m"
+            f"&timezone=auto"
         )
         air_quality_url = (
             f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}"
             f"&hourly=pm10,pm2_5,nitrogen_dioxide,ozone,sulphur_dioxide,carbon_monoxide,us_aqi"
+            f"&timezone=auto"
         )
 
         try:
@@ -285,13 +287,39 @@ class DataProcessor:
         return score.clip(0, 100).round(1)
 
     @staticmethod
-    def detect_alerts(df: pd.DataFrame) -> List[Dict[str, str]]:
-        """Scans current/recent data points for threshold violations."""
+    def get_reference_time(raw_data: Dict[str, Any]) -> datetime.datetime:
+        """
+        Current time expressed in the timezone of the API data.
+        Open-Meteo returns naive local times along with their UTC offset.
+        """
+        offset = raw_data.get("weather", {}).get("utc_offset_seconds")
+        if offset is None:
+            # Mock data is generated with the machine's local time
+            return datetime.datetime.now()
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        return now_utc + datetime.timedelta(seconds=offset)
+
+    @staticmethod
+    def get_current_index(df: pd.DataFrame, reference_time: Optional[datetime.datetime] = None) -> int:
+        """
+        Position of the most recent row that is not in the future.
+        The API also returns several days of forecasts, so the last row is not "now".
+        """
+        if reference_time is None:
+            return len(df) - 1
+        not_future = (df["datetime"] <= reference_time).to_numpy()
+        if not not_future.any():
+            return 0
+        return int(np.flatnonzero(not_future)[-1])
+
+    @staticmethod
+    def detect_alerts(df: pd.DataFrame, reference_time: Optional[datetime.datetime] = None) -> List[Dict[str, str]]:
+        """Scans the current data point for threshold violations."""
         alerts = []
         if df.empty:
             return alerts
 
-        latest = df.iloc[-1]
+        latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
         # PM2.5 check
         if latest["pm2_5"] >= THRESHOLDS["pm2_5"]["danger"]:
@@ -557,10 +585,11 @@ def render_dashboard():
 
     # Add calculated metrics
     df["health_score"] = DataProcessor.calculate_custom_health_index(df)
-    latest = df.iloc[-1]
+    reference_time = DataProcessor.get_reference_time(raw_data)
+    latest = df.iloc[DataProcessor.get_current_index(df, reference_time)]
 
     _render_hero(selected_city, latest, mock_mode)
-    _render_alerts(DataProcessor.detect_alerts(df))
+    _render_alerts(DataProcessor.detect_alerts(df, reference_time))
 
     # Visualizations
     tab1, tab2, tab3 = st.tabs([
@@ -620,6 +649,19 @@ class TestDashboardModules(unittest.TestCase):
     def test_alerts_detection(self):
         alerts = DataProcessor.detect_alerts(self.mock_df)
         self.assertTrue(len(alerts) > 0)
+
+    def test_current_index_skips_forecasts(self):
+        df = self.mock_df.assign(datetime=pd.to_datetime(self.mock_df["time"]))
+        reference_time = datetime.datetime(2026, 1, 1, 0, 30)
+        self.assertEqual(DataProcessor.get_current_index(df, reference_time), 0)
+        # Only the forecast row (40 °C, high pollution) would trigger alerts
+        self.assertEqual(DataProcessor.detect_alerts(df, reference_time), [])
+
+    def test_reference_time_uses_api_offset(self):
+        reference_time = DataProcessor.get_reference_time({"weather": {"utc_offset_seconds": 3600}})
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        delta = reference_time - now_utc
+        self.assertAlmostEqual(delta.total_seconds(), 3600, delta=5)
 
 
 if __name__ == "__main__":
