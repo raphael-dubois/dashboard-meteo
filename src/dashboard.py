@@ -174,7 +174,13 @@ def _build_retro_css(p: Dict[str, Any]) -> str:
 }}
 [data-testid="stCaptionContainer"] p {{ color: {p["muted"]}; }}
 [data-testid="stTabs"] [role="tablist"] {{ border-bottom-color: rgba(255, 43, 214, 0.3) !important; }}
-[data-testid="stTab"] p {{ font-family: {PIXEL} !important; font-size: 0.65rem; }}
+[data-testid="stTab"] p {{ font-family: {PIXEL} !important; font-size: 0.55rem; }}
+[data-testid="stButtonGroup"] button {{ background: transparent !important; border: 2px solid rgba(0, 240, 255, 0.5) !important; border-radius: 0 !important; }}
+[data-testid="stButtonGroup"] button, [data-testid="stButtonGroup"] button * {{ font-family: {TERMINAL} !important; font-size: 1.15rem; color: {p["text"]}; }}
+[data-testid="stButtonGroup"] button[data-selected] {{ border-color: {magenta} !important; box-shadow: 0 0 8px {magenta}; }}
+[data-testid="stButtonGroup"] button[data-selected] * {{ color: {magenta}; }}
+[data-testid="stTextInputRootElement"], [data-testid="stDateInputField"] {{ background: {p["surface"]} !important; border: 2px solid {cyan} !important; border-radius: 0 !important; }}
+[data-testid="stTextInputRootElement"] input, [data-testid="stDateInputField"] * {{ font-family: {TERMINAL} !important; font-size: 1.15rem; color: {p["text"]}; }}
 [data-testid="stTab"][aria-selected="true"] {{ border-bottom-color: {magenta} !important; box-shadow: 0 6px 8px -6px {magenta}; }}
 [data-testid="stTab"][aria-selected="true"] p {{ color: {magenta}; text-shadow: 0 0 6px {magenta}; }}
 [data-testid="stSelectbox"] [role="group"] {{ background: {p["surface"]} !important; border: 2px solid {cyan} !important; border-radius: 0 !important; color: {p["text"]}; }}
@@ -495,7 +501,7 @@ def _metrics_figure(
         legend=dict(yref="container", y=0.995, yanchor="top", orientation="h", x=0, xanchor="left"),
     )
     for annotation in fig.layout.annotations:
-        annotation.update(x=0, xanchor="left", font=dict(size=13))
+        annotation.update(x=0, xanchor="left", font=dict(size=17 if retro else 13))
 
     # Observations / forecasts boundary
     start, end = df["datetime"].min(), df["datetime"].max()
@@ -506,7 +512,7 @@ def _metrics_figure(
         fig.add_shape(type="line", xref="x", yref="paper", x0=now, x1=now, y0=0, y1=1,
                       line=dict(color=p["muted"] if retro else "rgba(128, 128, 128, 0.7)", width=1, dash="dot"))
         fig.add_annotation(x=now, y=1, xref="x", yref="paper", yanchor="bottom", xanchor="left",
-                           text="Maintenant · prévisions", showarrow=False, font=dict(size=12))
+                           text="Maintenant · prévisions", showarrow=False, font=dict(size=16 if retro else 12))
     return fig
 
 
@@ -758,7 +764,7 @@ def _render_sidebar() -> Tuple[Dict[str, Any], bool, bool, Any]:
         st.divider()
         st.subheader(":material/palette: Apparence")
         retro_mode = st.toggle(
-            "Mode rétro gaming",
+            "Mode rétro",
             value=False,
             help="Style arcade néon. Les modes clair et sombre se choisissent dans le menu Settings.",
         )
