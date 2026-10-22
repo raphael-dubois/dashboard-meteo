@@ -6,14 +6,20 @@ import datetime
 import functools
 import json
 import logging
+from contextlib import closing
 from typing import Dict, Any, List, Optional
 
 import requests
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Log level from the environment: INFO while developing, WARNING in production (see Dockerfile)
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CACHE_DB = os.path.join(BASE_DIR, "data", "data_cache.db")
+# Overridable so that a Docker volume can hold the cache without hiding data/mock_responses.json
+CACHE_DB = os.getenv("CACHE_DB_PATH", os.path.join(BASE_DIR, "data", "data_cache.db"))
 # Offline dataset: real API responses recorded for every reference city (python -m src.api_client)
 MOCK_DATA_PATH = os.path.join(BASE_DIR, "data", "mock_responses.json")
 CACHE_TTL_MINUTES = 30
@@ -81,7 +87,7 @@ class WeatherAPIClient:
     def __init__(self, db_path: str = CACHE_DB, mock_path: str = MOCK_DATA_PATH):
         self.db_path = db_path
         self.mock_path = mock_path
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         self._init_db()
 
     def search_cities(self, query: str, count: int = 8, language: str = "fr") -> list[Dict[str, Any]]:
@@ -135,7 +141,7 @@ class WeatherAPIClient:
     def _init_db(self) -> None:
         """Initializes SQLite cache database table."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS api_cache (
@@ -151,7 +157,7 @@ class WeatherAPIClient:
     def _get_cached_data(self, key: str) -> Optional[Dict[str, Any]]:
         """Retrieves cached json response if within TTL limit."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT response, timestamp FROM api_cache WHERE key = ?", (key,))
                 row = cursor.fetchone()
@@ -167,11 +173,15 @@ class WeatherAPIClient:
         return None
 
     def _set_cached_data(self, key: str, data: Dict[str, Any]) -> None:
-        """Saves API response to local SQLite cache."""
+        """Saves API response to local SQLite cache and drops expired entries."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn:
                 cursor = conn.cursor()
-                now_str = datetime.datetime.now().isoformat()
+                now = datetime.datetime.now()
+                now_str = now.isoformat()
+                # Purge expired entries so the cache stays small on a public deployment
+                expiry_str = (now - datetime.timedelta(minutes=CACHE_TTL_MINUTES)).isoformat()
+                cursor.execute("DELETE FROM api_cache WHERE timestamp < ?", (expiry_str,))
                 cursor.execute("""
                     INSERT OR REPLACE INTO api_cache (key, response, timestamp)
                     VALUES (?, ?, ?)

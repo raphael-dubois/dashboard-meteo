@@ -1,7 +1,9 @@
 import datetime
 import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from unittest import mock
 
 import requests
@@ -86,6 +88,17 @@ class TestWeatherAPIClient(unittest.TestCase):
         payload = {"hello": "world"}
         self.client._set_cached_data("test_key", payload)
         self.assertEqual(self.client._get_cached_data("test_key"), payload)
+
+    def test_expired_cache_entries_are_purged_on_write(self):
+        self.client._set_cached_data("old_key", {"a": 1})
+        stale = (datetime.datetime.now() - datetime.timedelta(hours=2)).isoformat()
+        with closing(sqlite3.connect(self.client.db_path)) as conn:
+            conn.execute("UPDATE api_cache SET timestamp = ? WHERE key = 'old_key'", (stale,))
+            conn.commit()
+        self.client._set_cached_data("new_key", {"b": 2})
+        with closing(sqlite3.connect(self.client.db_path)) as conn:
+            keys = {row[0] for row in conn.execute("SELECT key FROM api_cache")}
+        self.assertEqual(keys, {"new_key"})
 
     def test_cache_miss(self):
         self.assertIsNone(self.client._get_cached_data("unknown_key"))
