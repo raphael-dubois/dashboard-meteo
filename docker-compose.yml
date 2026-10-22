@@ -1,0 +1,21 @@
+# Lancement en production : docker compose up -d --build
+services:
+  dashboard:
+    build: .
+    image: dashboard-meteo:latest
+    ports:
+      - "8501:8501"
+    environment:
+      LOG_LEVEL: WARNING
+      # Pour servir le dashboard sous un sous-chemin du portfolio (ex. https://mon-site.fr/meteo),
+      # décommenter la ligne suivante et faire pointer le reverse proxy vers ce conteneur
+      # STREAMLIT_SERVER_BASE_URL_PATH: meteo
+    volumes:
+      # Cache SQLite des réponses API conservé entre deux redémarrages
+      - api-cache:/app/cache
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  api-cache:

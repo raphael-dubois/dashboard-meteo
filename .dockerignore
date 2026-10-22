@@ -1,0 +1,16 @@
+# Seuls run.py, src/, .streamlit/, data/mock_responses.json et requirements.txt sont utiles à l'image
+.git
+.gitignore
+.venv
+.claude
+.pytest_cache
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+*.db
+data/*.db
+tests
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
