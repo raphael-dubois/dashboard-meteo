@@ -2,7 +2,7 @@
 services:
   dashboard:
     build: .
-    image: dashboard-meteo:latest
+    image: weather-dashboard:latest
     ports:
       - "8501:8501"
     environment:

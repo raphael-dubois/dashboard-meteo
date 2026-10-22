@@ -1,1 +1,1 @@
-# dashboard-meteo
+# weather-dashboard
