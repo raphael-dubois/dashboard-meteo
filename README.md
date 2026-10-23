@@ -2,6 +2,8 @@
 
 Dashboard Streamlit de suivi météo et de qualité de l'air, basé sur l'API [Open-Meteo](https://open-meteo.com/) (gratuite, sans clé).
 
+Le dashboard est accessible en ligne sur [weather.rdubois.eu](https://weather.rdubois.eu).
+
 ## Fonctionnalités
 
 - Conditions actuelles : température, ressentie, min/max, humidité, vent, précipitations, nuages, pression, score confort
